@@ -19,6 +19,7 @@ from .core import (
     inicializar_tabela_processos, upsert_processo,
     buscar_processo_por_numero, buscar_processo_por_status,
     ErroProcesso, ErroExtracao, ErroValidacao, ErroDownload, ErroSEI,
+    ErroLoginSEI, ErroLoginSiafe,
 )
 from .services import (
     mapear_estado_documentos, encontrar_dados_em_anexos, extrair_dados_comprovante_do_processo,
@@ -149,14 +150,14 @@ def coletar_dados_processo(sei: SEI, processo: str, siafe_usuario: str, siafe_se
             log.info("GR ja disponivel na PASTA_GR.")
         elif registro_gr:
             caminho_gr = baixar_gr_no_siafe(
-                registro_gr, sei, versao_siafe=1,
+                registro_gr, versao_siafe=versao_siafe,
                 siafe_usuario=siafe_usuario, siafe_senha=siafe_senha,
             )
             if not caminho_gr:
                 raise ErroDownload(f"PDF da GR {num_doc} nao disponivel no SIAFE-Rio 2.")
         else:
             caminho_gr = baixar_gr_siafe_por_valor(
-                valor_pesquisa, ano, sei, versao_siafe=versao_siafe,
+                valor_pesquisa, ano, versao_siafe=versao_siafe,
                 siafe_usuario=siafe_usuario, siafe_senha=siafe_senha,
                 data_pagamento=data_pagamento,
             )
@@ -266,6 +267,8 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> None:
                 "data": data_pagamento or "",
             }
             formatar_despacho_inserido(sei, registro_despacho, TITULO_DESPACHO, index_doc)
+        except (ErroSEI, ErroValidacao):
+            raise
         except Exception as e:
             raise ErroSEI(f"Erro ao formatar/inserir despacho: {e}")
         upsert_processo(processo=processo, status="dados_coletados", tem_despacho_apos_gr=1)
@@ -412,7 +415,7 @@ def etapa1_coletar(
         log.info("[ETAPA 1] Iniciando navegador")
         log.info("[ETAPA 1] Autenticando no SEI")
         if not sei.logar_sei(sei_user, sei_pass, orgao_sei):
-            return {"sucesso": False, "motivo": "falha_login", "estatisticas": estatisticas}
+            raise ErroLoginSEI("Falha no login SEI.")
 
         log.info("[ETAPA 1] Coletando processos no marcador")
         processos = sei.visualizar_processos_por_marcador(marcador_filtro)
@@ -438,6 +441,12 @@ def etapa1_coletar(
             try:
                 payload = coletar_dados_processo(sei, processo, siafe_user, siafe_pass)
                 _persistir_resultado_coleta(processo, payload, estatisticas)
+            except ErroLoginSiafe:
+                log.error(f"[{i}/{total}] {processo} falha de login no SIAFE, interrompendo lote.")
+                return {
+                    "sucesso": False, "motivo": "falha_login_siafe",
+                    "estatisticas": estatisticas,
+                }
             except Exception as e:
                 navegador_perdido = _logar_erro_lote(processo, i, total, e, "coleta")
                 _registrar_erro_coleta(processo, e, estatisticas)
@@ -450,6 +459,8 @@ def etapa1_coletar(
                     "estatisticas": estatisticas,
                 }
 
+    except ErroLoginSEI:
+        return {"sucesso": False, "motivo": "falha_login", "estatisticas": estatisticas}
     except Exception as e:
         log.error(f"[ETAPA 1] Erro critico: {mensagem_curta(e)}", exc_info=True)
         return {"sucesso": False, "motivo": "erro_critico", "estatisticas": estatisticas, "erro": str(e)}
@@ -485,7 +496,7 @@ def etapa2_finalizar(
         log.info("[ETAPA 2] Iniciando navegador")
         log.info("[ETAPA 2] Autenticando no SEI")
         if not sei.logar_sei(sei_user, sei_pass, orgao_sei):
-            return {"sucesso": False, "motivo": "falha_login", "estatisticas": estatisticas}
+            raise ErroLoginSEI("Falha no login SEI.")
 
         pendentes = buscar_processo_por_status("dados_coletados")
         total = len(pendentes)
@@ -504,7 +515,7 @@ def etapa2_finalizar(
             try:
                 finalizar_processo(sei, reg)
                 upsert_processo(
-                    processo=processo, status="concluido", index_doc=reg.get("index_doc"),
+                    processo=processo, status="concluido",
                     usuario_resposta=sei_user,
                     data_hora_resposta=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     tempo_resposta=round(time.monotonic() - inicio, 2),
@@ -524,6 +535,8 @@ def etapa2_finalizar(
                     "estatisticas": estatisticas,
                 }
 
+    except ErroLoginSEI:
+        return {"sucesso": False, "motivo": "falha_login", "estatisticas": estatisticas}
     except Exception as e:
         log.error(f"[ETAPA 2] Erro critico: {mensagem_curta(e)}", exc_info=True)
         return {"sucesso": False, "motivo": "erro_critico", "estatisticas": estatisticas, "erro": str(e)}
