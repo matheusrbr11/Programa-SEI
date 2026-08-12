@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from selenium.webdriver.common.print_page_options import PrintOptions
 from datetime import datetime, timedelta
+from contextlib import closing
 from num2words import num2words
 from typing import Callable
 from pathlib import Path
@@ -76,7 +77,7 @@ def _listar_contabilizacoes() -> list[dict]:
             _cache_contabilizacoes = []
         else:
             try:
-                with sqlite3.connect(CAMINHO_HERMES) as con:
+                with closing(sqlite3.connect(CAMINHO_HERMES)) as con:
                     con.row_factory = sqlite3.Row
                     cursor = con.execute(
                         "SELECT id, num_documento, valor, observacao, data FROM contabilizacoes"
