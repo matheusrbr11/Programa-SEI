@@ -108,11 +108,21 @@ def extrair_texto_pdf(caminho_pdf: str) -> str:
 
 def aguardar_novo_pdf(pasta: Path, arquivos_antes: set[Path], timeout: int = 30) -> Path | None:
     """Aguarda surgimento de novo PDF na pasta de downloads."""
+    novo_pdf: Path | None = None
+    tamanho_anterior = -1
     for _ in range(timeout):
-        novos = set(pasta.glob("*.pdf")) - arquivos_antes
-        if novos:
-            time.sleep(1)
-            return list(novos)[0]
+        if novo_pdf is None:
+            novos = set(pasta.glob("*.pdf")) - arquivos_antes
+            if novos:
+                novo_pdf = list(novos)[0]
+                tamanho_anterior = novo_pdf.stat().st_size
+                time.sleep(1)
+                continue
+        else:
+            tamanho_atual = novo_pdf.stat().st_size
+            if tamanho_atual == tamanho_anterior:
+                return novo_pdf
+            tamanho_anterior = tamanho_atual
         time.sleep(1)
     log.warning("Timeout: nenhum PDF novo detectado na pasta Downloads.")
     return None
@@ -127,6 +137,27 @@ def formatar_nome_arquivo(nome: str) -> str:
     return sem_acentos.replace("/", "").replace("\\", "")
 
 
+_cache_pasta_gr: list[str] | None = None
+
+
+def _listar_arquivos(diretorio: Path, extensao: str) -> list[str]:
+    """Lista arquivos recursivamente. Para PASTA_GR, cacheia em memória
+    pelo tempo de vida do processo — só este programa escreve nela, e o
+    cache é atualizado a cada gravação via _registrar_arquivo_pasta_gr."""
+    global _cache_pasta_gr
+    if diretorio == PASTA_GR:
+        if _cache_pasta_gr is None:
+            _cache_pasta_gr = automaweb.listar_recursivo(diretorio=str(diretorio), extensao=extensao)
+        return _cache_pasta_gr
+    return automaweb.listar_recursivo(diretorio=str(diretorio), extensao=extensao)
+
+
+def _registrar_arquivo_pasta_gr(caminho: str) -> None:
+    """Registra um arquivo recem-gravado em PASTA_GR, mantendo o cache coerente."""
+    if _cache_pasta_gr is not None:
+        _cache_pasta_gr.append(str(caminho))
+
+
 def localizar_arquivo_em_disco(
     diretorio: Path,
     *,
@@ -135,8 +166,7 @@ def localizar_arquivo_em_disco(
     extensao: str = ".pdf",
 ) -> str | None:
     """Busca recursiva de arquivo por critérios flexíveis."""
-    
-    lista = automaweb.listar_recursivo(diretorio=str(diretorio), extensao=extensao)
+    lista = _listar_arquivos(diretorio, extensao)
     for arq in lista:
         path = Path(arq)
         if nome_igual and path.stem == nome_igual:
@@ -171,4 +201,5 @@ def mover_gr_para_destino(arquivo_baixado: Path, num_doc: str, valor: float) -> 
     valor_fmt = formatar_moeda(float(valor))
     caminho_final = PASTA_GR / f"{num_doc} - R$ {valor_fmt}.pdf"
     automaweb.mover_arquivo(str(arquivo_baixado), str(caminho_final))
+    _registrar_arquivo_pasta_gr(str(caminho_final))
     return str(caminho_final)
