@@ -19,7 +19,7 @@ from .config import (
     URL_BB, URL_SIAFE, CAMINHO_DRIVER_EDGE, CAMINHO_HERMES, PASTA_GR,
     CONTA_PROCESSAR, NOME_PDF_PGE,
 )
-from .core import ErroSEI
+from .core import ErroSEI, ErroSIAFE, ErroBB, ErroLoginSiafe, ErroExtracao, ErroValidacao, ErroDownload
 from .utils import (
     buscar_regex,
     extrair_texto_pdf,
@@ -29,6 +29,7 @@ from .utils import (
     aguardar_novo_pdf,
     mover_gr_para_destino,
     mensagem_curta,
+    _registrar_arquivo_pasta_gr,
 )
 
 log = logging.getLogger("jupiter.processarCC")
@@ -60,6 +61,33 @@ def _capturar_mensagem_erro_bb(nav) -> str | None:
     return None
 
 
+_cache_contabilizacoes: list[dict] | None = None
+
+
+def _listar_contabilizacoes() -> list[dict]:
+    """Le a tabela contabilizacoes uma vez e cacheia em memoria pelo tempo de
+    vida do processo. É somente leitura para este programa (quem escreve é o
+    modulo PRJ do Hermes) — no pior caso, uma contabilizacao adicionada pelo
+    Hermes durante o lote fica fora do cache, e o programa apenas baixa a GR
+    pelo SIAFE em vez de reaproveitar, sem causar nenhuma acao incorreta."""
+    global _cache_contabilizacoes
+    if _cache_contabilizacoes is None:
+        if not CAMINHO_HERMES.exists():
+            _cache_contabilizacoes = []
+        else:
+            try:
+                with sqlite3.connect(CAMINHO_HERMES) as con:
+                    con.row_factory = sqlite3.Row
+                    cursor = con.execute(
+                        "SELECT id, num_documento, valor, observacao, data FROM contabilizacoes"
+                    )
+                    _cache_contabilizacoes = [dict(r) for r in cursor.fetchall()]
+            except sqlite3.Error as e:
+                log.error(f"Erro SQLite ao carregar contabilizacoes: {e}", exc_info=True)
+                _cache_contabilizacoes = []
+    return _cache_contabilizacoes
+
+
 def _buscar_data_pagamento_por_conta(conta_judicial: str) -> str | None:
     """
     Busca em contabilizacoes (somente leitura) a 'Data do Pagamento' de um
@@ -69,22 +97,13 @@ def _buscar_data_pagamento_por_conta(conta_judicial: str) -> str | None:
     (ex.: 'Data do Depósito' do Alvará de Levantamento) está desatualizada
     e o BB não retorna o resgate com ela.
     """
-    if not conta_judicial or not CAMINHO_HERMES.exists():
-        return None
-    try:
-        with sqlite3.connect(CAMINHO_HERMES) as con:
-            con.row_factory = sqlite3.Row
-            cursor = con.cursor()
-            cursor.execute(
-                """SELECT observacao FROM contabilizacoes
-                   WHERE observacao LIKE ?""",
-                (f"%{conta_judicial}%",),
-            )
-            row = cursor.fetchone()
-    except sqlite3.Error as e:
-        log.error(f"Erro SQLite ao buscar data de pagamento no banco: {e}", exc_info=True)
+    if not conta_judicial:
         return None
 
+    row = next(
+        (r for r in _listar_contabilizacoes() if conta_judicial in (r["observacao"] or "")),
+        None,
+    )
     if not row:
         return None
 
@@ -119,15 +138,14 @@ def _tentar_resgate_bb(nav, conta_judicial: str, cnpj: str, data_alvara: str) ->
     return None
 
 
-def baixar_comprovante_bb(dados_oficio: dict) -> Path | None:
+def baixar_comprovante_bb(dados_oficio: dict) -> Path:
     """Localiza o comprovante na PASTA_GR ou navega no site do BB para obtê-lo."""
     data_alvara = dados_oficio.get("data_alvara")
     conta_judicial = dados_oficio.get("conta_judicial")
     cnpj = dados_oficio.get("cnpj")
 
     if not all([data_alvara, conta_judicial, cnpj]):
-        log.error("Dados insuficientes para consulta BB.")
-        return None
+        raise ErroValidacao("Dados insuficientes para consulta BB.")
 
     caminho_em_disco = localizar_comprovante_em_disco(conta_judicial)
     if caminho_em_disco:
@@ -137,8 +155,7 @@ def baixar_comprovante_bb(dados_oficio: dict) -> Path | None:
     try:
         datetime.strptime(data_alvara, "%d/%m/%Y")
     except (ValueError, TypeError) as e:
-        log.error(f"Data invalida para consulta BB: {data_alvara} — {e}", exc_info=True)
-        return None
+        raise ErroValidacao(f"Data invalida para consulta BB: {data_alvara} — {e}") from e
 
     nav = automaweb.Navegador()
     try:
@@ -151,7 +168,7 @@ def baixar_comprovante_bb(dados_oficio: dict) -> Path | None:
 
             data_fallback = _buscar_data_pagamento_por_conta(conta_judicial)
             if not data_fallback or data_fallback == data_alvara:
-                return None
+                raise ErroDownload(f"BB nao retornou resgate para conta {conta_judicial}: {erro}")
 
             log.info(
                 f"Tentando novamente para conta {conta_judicial} com a data de "
@@ -160,11 +177,10 @@ def baixar_comprovante_bb(dados_oficio: dict) -> Path | None:
             nav.abrir_url(URL_BB)
             erro = _tentar_resgate_bb(nav, conta_judicial, cnpj, data_fallback)
             if erro:
-                log.warning(
+                raise ErroDownload(
                     f"BB nao retornou resgate para conta {conta_judicial} mesmo com "
                     f"a data de contabilizacoes: {erro}"
                 )
-                return None
 
         nav.clicar('//*[@id="tblResgate"]/tbody/tr/td[1]/input')
         nav.clicar('//*[@id="formulario:btnContinuar"]')
@@ -176,12 +192,14 @@ def baixar_comprovante_bb(dados_oficio: dict) -> Path | None:
         pdf_base64 = nav.driver.print_page(PrintOptions())
         with open(caminho_comprovante, "wb") as f:
             f.write(base64.b64decode(pdf_base64))
+        _registrar_arquivo_pasta_gr(str(caminho_comprovante))
 
         return caminho_comprovante
 
+    except ErroDownload:
+        raise
     except Exception as e:
-        log.error(f"Erro durante navegacao no site do BB: {mensagem_curta(e)}", exc_info=True)
-        return None
+        raise ErroBB(f"Erro durante navegacao no site do BB: {mensagem_curta(e)}") from e
     finally:
         try:
             nav.driver.quit()
@@ -212,9 +230,10 @@ def consultar_conta_judicial(lista_dados: list[dict]) -> dict | None:
             f"conta={conta_judicial}, cnpj={dados_oficio.get('cnpj')}"
         )
 
-        caminho_comprovante = baixar_comprovante_bb(dados_oficio)
-        if not caminho_comprovante:
-            log.warning(f"Falha ao obter comprovante para conta {conta_judicial}")
+        try:
+            caminho_comprovante = baixar_comprovante_bb(dados_oficio)
+        except (ErroBB, ErroDownload, ErroValidacao) as e:
+            log.warning(f"Falha ao obter comprovante para conta {conta_judicial}: {mensagem_curta(e)}")
             continue
 
         texto_comprovante = extrair_texto_pdf(str(caminho_comprovante))
@@ -247,28 +266,14 @@ def consultar_conta_judicial(lista_dados: list[dict]) -> dict | None:
 # SIAFE — download de Guias de Recolhimento
 # ---------------------------------------------------------------------------
 def buscar_gr_no_banco(num_judicial: str) -> dict | None:
-    """Consulta a tabela contabilizacoes (somente leitura) no hermes.db."""
-    if not CAMINHO_HERMES.exists():
-        return None
-    try:
-        with sqlite3.connect(CAMINHO_HERMES) as con:
-            con.row_factory = sqlite3.Row
-            cursor = con.cursor()
-            cursor.execute(
-                """SELECT id, num_documento, valor, observacao, data
-                   FROM contabilizacoes
-                   WHERE observacao LIKE ? AND num_documento IS NOT NULL""",
-                (f"%{num_judicial}%",),
-            )
-            row = cursor.fetchone()
-            return dict(row) if row else None
-    except sqlite3.Error as e:
-        log.error(f"Erro SQLite ao buscar GR no banco: {e}", exc_info=True)
-        return None
+    """Consulta a tabela contabilizacoes (somente leitura, cacheada em memoria) no hermes.db."""
+    for row in _listar_contabilizacoes():
+        if row["num_documento"] is not None and num_judicial in (row["observacao"] or ""):
+            return row
+    return None
 
 
 def _executar_download_gr_siafe(
-    sei: SEI,
     versao_siafe: int,
     siafe_usuario: str,
     siafe_senha: str,
@@ -279,16 +284,10 @@ def _executar_download_gr_siafe(
     """Template Method para download de GR no SIAFE."""
     url = URL_SIAFE.get(versao_siafe)
     if url is None:
-        log.error(f"Versao SIAFE invalida: {versao_siafe}")
-        return None
+        raise ErroSIAFE(f"Versao SIAFE invalida: {versao_siafe}")
 
     siafe = Siafe()
     try:
-        
-        siafe.driver = sei.driver
-        siafe.wait = sei.wait
-
-        
         siafe.abrir_driver(tempo_wait=20)
         siafe.abrir_url(url)
 
@@ -296,8 +295,7 @@ def _executar_download_gr_siafe(
         arquivos_antes = set(pasta_downloads.glob("*.pdf"))
 
         if not siafe.logar_siafe(versao_siafe, siafe_usuario, siafe_senha, ano_doc):
-            log.error("Falha no login SIAFE.")
-            return None
+            raise ErroLoginSiafe("Falha no login SIAFE.")
 
         num_doc = acao_consulta(siafe)
         if not num_doc:
@@ -310,9 +308,10 @@ def _executar_download_gr_siafe(
 
         return mover_gr_para_destino(arquivo_baixado, num_doc, valor)
 
+    except ErroLoginSiafe:
+        raise
     except Exception as e:
-        log.error(f"Erro inesperado no download SIAFE: {mensagem_curta(e)}", exc_info=True)
-        return None
+        raise ErroSIAFE(f"Erro inesperado no download SIAFE: {mensagem_curta(e)}") from e
     finally:
         try:
             siafe.fechar_driver()
@@ -322,7 +321,7 @@ def _executar_download_gr_siafe(
 
 
 def baixar_gr_no_siafe(
-    registro: dict, sei: SEI, versao_siafe: int, siafe_usuario: str, siafe_senha: str
+    registro: dict, versao_siafe: int, siafe_usuario: str, siafe_senha: str
 ) -> str | None:
     """Download de GR quando já se conhece o num_documento (a partir de 2025)."""
 
@@ -331,7 +330,6 @@ def baixar_gr_no_siafe(
         return num_doc if siafe.consultar_GR_numDoc(num_doc) else None
 
     return _executar_download_gr_siafe(
-        sei=sei,
         versao_siafe=versao_siafe,
         siafe_usuario=siafe_usuario,
         siafe_senha=siafe_senha,
@@ -344,7 +342,6 @@ def baixar_gr_no_siafe(
 def baixar_gr_siafe_por_valor(
     valor_pesquisa: float,
     ano: int,
-    sei: SEI,
     versao_siafe: int,
     siafe_usuario: str,
     siafe_senha: str,
@@ -356,7 +353,6 @@ def baixar_gr_siafe_por_valor(
         return siafe.consultar_GR_valor(valor_pesquisa, versao_siafe, data_pagamento=data_pagamento)
 
     return _executar_download_gr_siafe(
-        sei=sei,
         versao_siafe=versao_siafe,
         siafe_usuario=siafe_usuario,
         siafe_senha=siafe_senha,
@@ -369,18 +365,16 @@ def baixar_gr_siafe_por_valor(
 # ---------------------------------------------------------------------------
 # SEI — helpers reutilizáveis de interação
 # ---------------------------------------------------------------------------
-def baixar_e_extrair_texto(sei: SEI, nome_doc: str) -> str | None:
+def baixar_e_extrair_texto(sei: SEI, nome_doc: str) -> str:
     """Baixa documento do SEI, renomeia, extrai texto do PDF."""
     caminho_definitivo = Path.cwd() / "Documento.pdf"
     try:
         if not sei.baixar_documento(nome_doc):
-            log.warning(f"[{nome_doc}] Download falhou.")
-            return None
+            raise ErroSEI(f"[{nome_doc}] Download falhou.")
 
         caminho_baixado = Path.cwd() / f"{formatar_nome_arquivo(nome_doc)}.pdf"
         if not caminho_baixado.exists():
-            log.warning(f"[{nome_doc}] Arquivo nao localizado apos download.")
-            return None
+            raise ErroSEI(f"[{nome_doc}] Arquivo nao localizado apos download.")
 
         if caminho_baixado.resolve() != caminho_definitivo.resolve():
             if caminho_definitivo.exists():
@@ -389,13 +383,13 @@ def baixar_e_extrair_texto(sei: SEI, nome_doc: str) -> str | None:
 
         texto_pdf = extrair_texto_pdf(str(caminho_definitivo))
         if not texto_pdf.strip():
-            log.warning(f"[{nome_doc}] PDF sem texto extraivel.")
-            return None
+            raise ErroExtracao(f"[{nome_doc}] PDF sem texto extraivel.")
 
         return texto_pdf
+    except (ErroSEI, ErroExtracao):
+        raise
     except Exception as e:
-        log.warning(f"[{nome_doc}] Erro inesperado: {mensagem_curta(e)}", exc_info=True)
-        return None
+        raise ErroSEI(f"[{nome_doc}] Erro inesperado: {mensagem_curta(e)}") from e
 
 
 def encontrar_dados_em_anexos(sei: SEI, candidatos: list[str]) -> dict | None:
@@ -408,9 +402,10 @@ def encontrar_dados_em_anexos(sei: SEI, candidatos: list[str]) -> dict | None:
 
     for nome_doc in prioritarios + restantes:
         log.info(f"Buscando dados em: '{nome_doc}'...")
-        texto_pdf = baixar_e_extrair_texto(sei, nome_doc)
-        if not texto_pdf:
-            log.warning(f"  [{nome_doc}] Pulando (falha no download/texto).")
+        try:
+            texto_pdf = baixar_e_extrair_texto(sei, nome_doc)
+        except (ErroSEI, ErroExtracao) as e:
+            log.warning(f"  [{nome_doc}] Pulando ({mensagem_curta(e)}).")
             continue
 
         dados = extrair_dados_documento(texto_pdf)
@@ -434,8 +429,6 @@ def extrair_dados_comprovante_do_processo(sei: SEI, nome_comprovante: str) -> di
 
     log.info(f"Comprovante ja presente no processo ('{nome_comprovante}'). Extraindo...")
     texto_pdf = baixar_e_extrair_texto(sei, nome_comprovante)
-    if not texto_pdf:
-        return None
     return ExtratorComprovante.extrair(texto_pdf)
 
 
@@ -443,9 +436,8 @@ def formatar_despacho_inserido(sei: SEI, registro: dict, titulo: str, index_doc:
     """Formata o despacho no SEI com valor por extenso."""
     try:
         valor_float = float(registro["valor"])
-    except (ValueError, TypeError):
-        log.error("Valor invalido para formatacao do despacho.")
-        return
+    except (ValueError, TypeError) as e:
+        raise ErroValidacao("Valor invalido para formatacao do despacho.") from e
 
     valor_formatado = formatar_moeda(valor_float)
     try:
