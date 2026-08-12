@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import undetected_chromedriver as uc
+from contextlib import closing
 from jupiter import configurar_log
 from typing import Any
 import urllib3
@@ -19,28 +20,55 @@ log = logging.getLogger("jupiter.processarCC")
 # ---------------------------------------------------------------------------
 # Exceções
 # ---------------------------------------------------------------------------
+# Erros de autenticação: falha de credencial/sessão, não de UM processo
+# específico — devem interromper o lote inteiro, não apenas pular o item atual.
+class ErroLoginSEI(Exception):
+    """Falha de autenticacao no SEI."""
+    pass
+
+
+class ErroLoginSiafe(Exception):
+    """Falha de autenticacao no SIAFE."""
+    pass
+
+
+# Base dos erros esperados durante o processamento de UM processo especifico
+# (o lote continua para o proximo item; ver _logar_erro_lote em orchestrator.py).
 class ErroProcesso(Exception):
     """Erro esperado durante o processamento de um processo específico."""
     pass
 
 
+# Erros de serviço: o código não conseguiu completar a interação com o
+# sistema externo (elemento não apareceu, clique falhou, navegação quebrou).
+class ErroSEI(ErroProcesso):
+    """Erro ao interagir com o SEI (anexar, despachar, bloco, marcador)."""
+    pass
+
+
+class ErroSIAFE(ErroProcesso):
+    """Erro ao interagir com o SIAFE (fora de falha de login)."""
+    pass
+
+
+class ErroBB(ErroProcesso):
+    """Erro ao interagir com o site do Banco do Brasil."""
+    pass
+
+
+# Outros
 class ErroExtracao(ErroProcesso):
     """Falha ao extrair dados de um documento/anexo."""
     pass
 
 
 class ErroDownload(ErroProcesso):
-    """Falha ao baixar documento externo (BB ou SIAFE)."""
+    """Documento nao encontrado/disponivel para download (BB ou SIAFE)."""
     pass
 
 
 class ErroValidacao(ErroProcesso):
     """Dados extraídos não passaram na validação de negócio."""
-    pass
-
-
-class ErroSEI(ErroProcesso):
-    """Erro ao interagir com o SEI (anexar, despachar, bloco, marcador)."""
     pass
 
 
@@ -198,7 +226,6 @@ def inicializar_tabela_processos() -> None:
         num_doc              TEXT,
         cnpj                 TEXT,
         data_alvara          TEXT,
-        index_doc            TEXT,
         tem_gr               INTEGER DEFAULT 0,
         tem_comprovante      INTEGER DEFAULT 0,
         tem_despacho_apos_gr INTEGER DEFAULT 0,
@@ -209,7 +236,7 @@ def inicializar_tabela_processos() -> None:
     CREATE INDEX IF NOT EXISTS idx_proc_cc_status   ON {TABELA_PROCESSOS}(status);
     CREATE INDEX IF NOT EXISTS idx_proc_cc_processo ON {TABELA_PROCESSOS}(processo);
     """
-    with _conectar_db() as con:
+    with closing(_conectar_db()) as con:
         con.executescript(ddl)
         con.commit()
 
@@ -228,7 +255,6 @@ def upsert_processo(
     num_doc: str | None = None,
     cnpj: str | None = None,
     data_alvara: str | None = None,
-    index_doc: str | None = None,
     tem_gr: int = 0,
     tem_comprovante: int = 0,
     tem_despacho_apos_gr: int = 0,
@@ -240,7 +266,7 @@ def upsert_processo(
     Insere ou atualiza um registro na tabela.
     Flags (tem_*) nunca são revertidas de 1 para 0 (idempotência).
     """
-    with _conectar_db() as con:
+    with closing(_conectar_db()) as con:
         cur = con.execute(
             f"""SELECT id, tem_gr, tem_comprovante, tem_despacho_apos_gr
                 FROM {TABELA_PROCESSOS} WHERE processo = ?""",
@@ -266,7 +292,6 @@ def upsert_processo(
                 "num_doc": num_doc,
                 "cnpj": cnpj,
                 "data_alvara": data_alvara,
-                "index_doc": index_doc,
                 "usuario_resposta": usuario_resposta,
                 "data_hora_resposta": data_hora_resposta,
                 "tempo_resposta": tempo_resposta,
@@ -303,13 +328,13 @@ def upsert_processo(
             f"""INSERT INTO {TABELA_PROCESSOS}
                 (processo, status, conta, conta_judicial, processo_judicial,
                  data_pagamento, ano, valor_pesquisa, caminho_comprovante,
-                 caminho_gr, num_doc, cnpj, data_alvara, index_doc,
+                 caminho_gr, num_doc, cnpj, data_alvara,
                  tem_gr, tem_comprovante, tem_despacho_apos_gr,
                  usuario_resposta, data_hora_resposta, tempo_resposta)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (processo, status, conta, conta_judicial, processo_judicial,
              data_pagamento, ano, valor_pesquisa, caminho_comprovante,
-             caminho_gr, num_doc, cnpj, data_alvara, index_doc,
+             caminho_gr, num_doc, cnpj, data_alvara,
              tem_gr, tem_comprovante, tem_despacho_apos_gr,
              usuario_resposta, data_hora_resposta, tempo_resposta),
         )
@@ -318,7 +343,7 @@ def upsert_processo(
 
 
 def buscar_processo_por_status(status: str) -> list[dict]:
-    with _conectar_db() as con:
+    with closing(_conectar_db()) as con:
         cur = con.execute(
             f"SELECT * FROM {TABELA_PROCESSOS} WHERE status = ? ORDER BY id", (status,)
         )
@@ -326,7 +351,7 @@ def buscar_processo_por_status(status: str) -> list[dict]:
 
 
 def buscar_processo_por_numero(processo: str) -> dict | None:
-    with _conectar_db() as con:
+    with closing(_conectar_db()) as con:
         cur = con.execute(f"SELECT * FROM {TABELA_PROCESSOS} WHERE processo = ?", (processo,))
         row = cur.fetchone()
         return dict(row) if row else None
