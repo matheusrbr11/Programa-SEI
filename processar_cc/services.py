@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 from num2words import num2words
 from typing import Callable
 from pathlib import Path
-import subprocess
 import logging
 import sqlite3
 import base64
@@ -29,6 +28,7 @@ from .utils import (
     aguardar_novo_pdf,
     mover_gr_para_destino,
     mensagem_curta,
+    navegador_perdido,
     _registrar_arquivo_pasta_gr,
 )
 
@@ -233,6 +233,8 @@ def consultar_conta_judicial(lista_dados: list[dict]) -> dict | None:
         try:
             caminho_comprovante = baixar_comprovante_bb(dados_oficio)
         except (ErroBB, ErroDownload, ErroValidacao) as e:
+            if navegador_perdido(e):
+                raise
             log.warning(f"Falha ao obter comprovante para conta {conta_judicial}: {mensagem_curta(e)}")
             continue
 
@@ -405,6 +407,8 @@ def encontrar_dados_em_anexos(sei: SEI, candidatos: list[str]) -> dict | None:
         try:
             texto_pdf = baixar_e_extrair_texto(sei, nome_doc)
         except (ErroSEI, ErroExtracao) as e:
+            if navegador_perdido(e):
+                raise
             log.warning(f"  [{nome_doc}] Pulando ({mensagem_curta(e)}).")
             continue
 
