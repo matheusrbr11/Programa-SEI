@@ -1,0 +1,9 @@
+base de dados/*
+build/*
+logs/*
+*.pdf
+*__pycache__*
+config.json
+.claude/*
+*.db
+
