@@ -1,6 +1,7 @@
 """Funções puras e utilitárias reutilizáveis (DRY)."""
 
 from __future__ import annotations
+from selenium.common.exceptions import WebDriverException, NoSuchElementException
 from pathlib import Path
 import unicodedata
 import pdfplumber
@@ -12,6 +13,30 @@ import re
 from .config import MESES, PASTA_GR
 
 log = logging.getLogger("jupiter.processarCC")
+
+ERROS_NAVEGADOR_PERDIDO = (WebDriverException)
+
+
+def navegador_perdido(exc: BaseException) -> bool:
+    """
+    Verifica se a exceção (ou alguma na sua cadeia de causas) indica que o
+    navegador/sessão morreu. Necessário porque o código de negócio costuma
+    envolver a exceção original do Selenium em ErroSEI/ErroSIAFE/ErroBB
+    (``except Exception as e: raise ErroSEI(f"...: {e}") from e``), perdendo
+    o tipo na cláusula except mas preservando a causa em __cause__/__context__.
+
+    Usado tanto no loop de lote (orchestrator.py) quanto nos loops de
+    candidato (services.py), pra garantir que uma sessao morta nunca seja
+    tratada como "so pular este item e tentar o proximo".
+    """
+    vista = set()
+    atual = exc
+    while atual is not None and id(atual) not in vista:
+        if isinstance(atual, ERROS_NAVEGADOR_PERDIDO) and not isinstance(atual, NoSuchElementException):
+            return True
+        vista.add(id(atual))
+        atual = atual.__cause__ or atual.__context__
+    return False
 
 
 def mensagem_curta(e: Exception) -> str:
