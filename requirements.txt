@@ -1,0 +1,10 @@
+selenium>=4.9.0
+undetected-chromedriver>=3.5.0
+customtkinter>=5.2.0
+pdfplumber>=0.10.0
+num2words>=0.5.12
+urllib3>=1.26.0
+automaweb
+TesouroEOP-UI
+jupiter-subtes
+setuptools>=70.0.0
