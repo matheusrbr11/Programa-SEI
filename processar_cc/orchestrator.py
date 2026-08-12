@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from selenium.common.exceptions import WebDriverException, NoSuchElementException
 from datetime import datetime
 from pathlib import Path
 import logging
@@ -26,21 +25,9 @@ from .services import (
     buscar_gr_no_banco, baixar_gr_no_siafe, baixar_gr_siafe_por_valor,
     formatar_despacho_inserido,
 )
-from .utils import localizar_gr_em_disco, mensagem_curta
+from .utils import localizar_gr_em_disco, mensagem_curta, navegador_perdido
 
 log = logging.getLogger("jupiter.processarCC")
-
-# Erros do Selenium que indicam que o navegador/sessão morreu — não há como
-# continuar o loop, pois todo processo restante falharia da mesma forma.
-# WebDriverException cobre esse caso de forma ampla: fechar a janela manualmente,
-# derrubar o processo do driver, perder conexão etc. podem surgir como
-# SessionNotCreatedException, InvalidSessionIdException, NoSuchWindowException
-# ou até a própria WebDriverException genérica, dependendo do momento da chamada.
-# NoSuchElementException HERDA de WebDriverException mas e excluida explicitamente
-# em _navegador_perdido: ela so indica que um elemento especifico nao foi
-# encontrado (ex.: timing de AJAX), erro do processo atual que nao impede
-# continuar o lote com o proximo.
-ERROS_NAVEGADOR_PERDIDO = (WebDriverException,)
 
 
 # ---------------------------------------------------------------------------
@@ -292,24 +279,6 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> None:
 # ---------------------------------------------------------------------------
 # Orquestração pública em lote
 # ---------------------------------------------------------------------------
-def _navegador_perdido(exc: BaseException) -> bool:
-    """
-    Verifica se a exceção (ou alguma na sua cadeia de causas) indica que o
-    navegador/sessão morreu. Necessário porque o código de negócio costuma
-    envolver a exceção original do Selenium em ErroSEI (``except Exception
-    as e: raise ErroSEI(f"...: {e}")``), perdendo o tipo na cláusula except
-    mas preservando a causa em __context__/__cause__.
-    """
-    vista = set()
-    atual = exc
-    while atual is not None and id(atual) not in vista:
-        if isinstance(atual, ERROS_NAVEGADOR_PERDIDO) and not isinstance(atual, NoSuchElementException):
-            return True
-        vista.add(id(atual))
-        atual = atual.__cause__ or atual.__context__
-    return False
-
-
 def _logar_erro_lote(processo: str, i: int, total: int, e: Exception, acao: str) -> bool:
     """
     Loga o erro de um item do lote (aviso para ErroProcesso, esperado; erro
@@ -323,7 +292,7 @@ def _logar_erro_lote(processo: str, i: int, total: int, e: Exception, acao: str)
     """
     msg = mensagem_curta(e)
 
-    if _navegador_perdido(e):
+    if navegador_perdido(e):
         log.error(f"[{i}/{total}] {processo} navegador perdido, interrompendo lote: {msg}", exc_info=True)
         return True
 
