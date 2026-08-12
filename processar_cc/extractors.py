@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 import logging
 import re
 
-from .config import CONTA_PROCESSAR, PADRAO_CNJ, PADRAO_DATA_EXTENSO, PADRAO_CNPJ
+from .config import CONTA_PROCESSAR, PADRAO_CNJ, PADRAO_DATA_EXTENSO, PADRAO_CNPJ, CNPJ_ESTADO
 from .utils import (
     buscar_regex,
     normalizar_processo_judicial,
@@ -215,7 +215,7 @@ class ExtratorAlvaraEletronico(ExtratorBase):
                 buscar_regex(trecho, r"(?:CPF/)?CNPJ\s+(?:Benefici[aá]rio|Autor)[\s.]*:\s*" + PADRAO_CNPJ)
             )
             if not cnpj:
-                cnpj = normalizar_cnpj(buscar_regex(trecho, r"(42\.?498\.?675/0001-?52)"))
+                cnpj = normalizar_cnpj(buscar_regex(trecho, CNPJ_ESTADO))
 
             if data_alvara and cnpj and contas_unicas:
                 for conta in contas_unicas:
@@ -250,7 +250,7 @@ class ExtratorAlvaraLevantamento(ExtratorBase):
                 buscar_regex(trecho, r"CNPJ\s+Benefici[aá]rio[\s.]*:\s*" + PADRAO_CNPJ)
             )
             if not cnpj:
-                cnpj = normalizar_cnpj(buscar_regex(trecho, r"(42\.?498\.?675/0001-?52)"))
+                cnpj = normalizar_cnpj(buscar_regex(trecho, CNPJ_ESTADO))
 
             if data_alvara and cnpj and contas_unicas:
                 for conta in contas_unicas:
