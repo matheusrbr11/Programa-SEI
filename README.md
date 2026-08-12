@@ -77,11 +77,11 @@ Pontos importantes do desenho:
 O Programa SEI standalone pede o login do **SEI** logo na abertura, antes do menu principal; o login do **SIAFE-Rio** só é pedido depois, sob demanda, ao clicar em **Processar Processos** (Etapa 1) — que é o único ponto do fluxo que precisa dele.
 
 1. **Login do SEI** (na abertura) — usuário e senha do SEI (sem restrição de formato). Válido durante toda a sessão, inclusive para a Etapa 2.
-2. **Login do SIAFE-Rio** (ao clicar em "Processar Processos") — CPF (11 dígitos) e senha, necessário para localizar/baixar a Guia de Recolhimento. Feito com sucesso, a Etapa 1 já é disparada automaticamente na Tela de Execução.
+2. **Login do SIAFE-Rio** (ao clicar em "Processar Processos", só na primeira vez) — CPF (11 dígitos) e senha, necessário para localizar/baixar a Guia de Recolhimento. Feito com sucesso, a Etapa 1 já é disparada automaticamente na Tela de Execução. Nas próximas vezes que "Processar Processos" for clicado na mesma sessão, a tela de login do SIAFE é pulada — a credencial já validada continua em memória — a menos que o SIAFE tenha rejeitado o login (ver abaixo), caso em que a credencial é descartada e a tela volta a aparecer.
 
 Ambas as telas reaproveitam o mesmo componente de login do `eop_ui.BaseApp` (`show_login_frame`), alternando a identidade visual (`self.cfg`) entre uma chamada e outra — o mesmo padrão usado pelo Hermes para simular múltiplas telas de login com uma única classe de app.
 
-Se o login do SEI falhar (código de saída `3` na Etapa 2), o programa volta para a tela de login do **SEI**. Se o login do SIAFE falhar (código `3` na Etapa 1), o programa volta para a tela de login do **SIAFE**, sem perder o login do SEI já feito. Cancelar a tela de login do SIAFE volta para a Tela de Execução do Crédito em Conta, sem sair do módulo.
+Falha de login do **SEI** (código de saída `3`, tanto na Etapa 1 quanto na Etapa 2 — é o único login feito no início de cada etapa) volta para a tela de login do **SEI**. Falha de login do **SIAFE** (código `5`, só pode ocorrer na Etapa 1, ao tentar baixar uma GR) volta para a tela de login do **SIAFE**, descartando a credencial guardada, sem perder o login do SEI já feito. Cancelar a tela de login do SIAFE volta para a Tela de Execução do Crédito em Conta, sem sair do módulo.
 
 ---
 
@@ -227,7 +227,6 @@ CREATE TABLE IF NOT EXISTS processos_credito_conta (
     num_doc              TEXT,
     cnpj                 TEXT,
     data_alvara          TEXT,
-    index_doc            TEXT,
     tem_gr               INTEGER DEFAULT 0,
     tem_comprovante      INTEGER DEFAULT 0,
     tem_despacho_apos_gr INTEGER DEFAULT 0,
@@ -246,8 +245,8 @@ O programa só **lê** a tabela `contabilizacoes` do Hermes — nunca grava nela
 1. **Abra o programa** e faça login com usuário e senha do **SEI**.
 2. No menu principal, clique em **Crédito em Conta**.
 3. Na Tela de Execução, clique em **Processar Processos** para rodar a Etapa 1:
-   - o programa primeiro pede o login com **CPF e senha do SIAFE-Rio**;
-   - feito o login, roda como subprocesso: percorre os processos marcados no SEI, extrai os dados e baixa/localiza a GR. A barra de progresso e o log acompanham o lote.
+   - na primeira vez da sessão, o programa pede o login com **CPF e senha do SIAFE-Rio**; nas próximas, pula direto pra Etapa 1 reaproveitando a credencial já validada;
+   - feito o login (ou reaproveitado), roda como subprocesso: percorre os processos marcados no SEI, extrai os dados e baixa/localiza a GR. A barra de progresso e o log acompanham o lote.
 4. Quando a Etapa 1 terminar (e retornar à Tela de Execução), clique em **Responder Processos** para rodar a Etapa 2:
    - não pede login adicional (reaproveita o login do SEI já feito);
    - anexa os documentos, inclui o despacho padrão e conclui cada processo coletado na etapa anterior.
@@ -289,9 +288,12 @@ Essa separação com checkpoint em banco permite retomar de onde parou caso o pr
   | Código | Significado | Mensagem na interface |
   | --- | --- | --- |
   | `0` | Sucesso total | "Processo concluído com sucesso!" |
-  | `2` | Parcial (alguns processos pulados) | "Concluído com Alertas" |
-  | `3` | Falha de login | "Erro de Login" — volta à tela de login do SIAFE (se `etapa1`) ou do SEI (se `etapa2`) |
-  | outro | Erro crítico | "Finalizado com Erros (código N)" |
+  | `1` | Parcial (alguns processos pulados) | "Concluído com Alertas" |
+  | `2` | Falha de login no SEI | "Erro de Login" — volta à tela de login do SEI |
+  | `3` | Falha de login no SIAFE (só `etapa1`) | "Erro de Login" — volta à tela de login do SIAFE, descartando a credencial guardada |
+  | `4` | Navegador/sessão perdida | "Navegador Perdido" — orienta a fechar e reabrir o programa |
+  | `5` | Erro crítico — bug/crash inesperado durante a automação (fora do loop por processo), ou erro de invocação do subprocesso (JSON/credenciais inválidas, etapa desconhecida) | "Erro Crítico" |
+  | outro | Motivo não mapeado (não deveria ocorrer) | "Finalizado com Erros (código N)" |
 
 > O subprocesso força `PYTHONUNBUFFERED=1` e `PYTHONIOENCODING=utf-8` para que a interface leia o progresso e os logs em tempo real, linha a linha.
 
@@ -331,7 +333,7 @@ Principais pacotes (veja [requirements.txt](requirements.txt) para as versões e
 Não há processos marcados com `PGE - Credito em Conta - Processar` no SEI. Confirme que o marcador foi aplicado aos processos corretos.
 
 **Falha no login do SEI ou do SIAFE.**
-O código de saída `3` do subprocesso devolve automaticamente à tela de login correspondente após 3 segundos: login do SIAFE se a falha foi na Etapa 1 ("Processar Processos"), login do SEI se foi na Etapa 2 ("Responder Processos"). Confirme usuário e senha.
+O subprocesso devolve automaticamente à tela de login correspondente após 3 segundos: código `2` volta pro login do SEI, código `3` volta pro login do SIAFE (só possível na Etapa 1, ao baixar uma GR) e descarta a credencial guardada. Confirme usuário e senha.
 
 **Erro crítico com o navegador.**
 Falhas de sessão do Selenium (`SessionNotCreatedException`, `InvalidSessionIdException`) exigem reiniciar o programa. Confirme que o Edge e o `msedgedriver.exe` são compatíveis.
