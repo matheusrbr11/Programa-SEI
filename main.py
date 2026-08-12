@@ -69,13 +69,16 @@ class SeiApp(BaseApp):
         self.sei_usuario = ""            # credenciais do sei, capturadas no login inicial
         self.sei_senha = ""
 
+        self.siafe_usuario = ""          # credenciais do siafe, só preenchidas se a Etapa 1 rodar
+        self.siafe_senha = ""
+
         self.graph = None                # GraphAPI; definido em __main__ após configurar_log
         self.dev_emails = []             # destinatários do e-mail de erro
         self.teams_webhook = None        # webhook do Teams (opcional)
         self.erros_acumulados = []       # falhas críticas da sessão; resumo enviado ao fechar
 
         # já abre direto na tela de login do SEI; ao logar, vai pro menu principal
-        self.show_login_frame(on_success=self.processar_login_sei)
+        self.show_sei_login_frame()
 
     def _enviar_resumo_erros(self):
         """Envia, uma única vez ao fechar, um resumo dos erros da sessão por e-mail e/ou Teams."""
@@ -124,7 +127,8 @@ class SeiApp(BaseApp):
         try:
             if self.siafe.driver:
                 self.siafe.fechar_driver()
-        except: pass
+        except Exception:
+            pass
         self.after(0, tela_retorno_fn)
 
     def limpar_recursos(self):
@@ -134,7 +138,8 @@ class SeiApp(BaseApp):
         try:
             if hasattr(self, 'siafe') and self.siafe.driver:
                 self.siafe.fechar_driver()
-        except: pass
+        except Exception:
+            pass
 
 
 # TELAS VISUAIS
@@ -146,12 +151,18 @@ class SeiApp(BaseApp):
         self.sei_senha = senha_digitada
         self.show_main_frame()
 
+    def show_sei_login_frame(self):
+
+        # wrapper do componente generico de login (eop_ui.BaseApp) pro SEI,
+        # no mesmo padrao de show_siafe_login_frame
+        self.show_login_frame(on_success=self.processar_login_sei)
+
     def show_main_frame(self):
 
         # menu principal: um botão pra cada módulo do programa
         self.clear_frame()
         self.create_menu()
-        self.add_back_button(lambda: self.show_login_frame(on_success=self.processar_login_sei))
+        self.add_back_button(self.show_sei_login_frame)
         self._add_logo()
         self.make_header_label("Programa SEI", pady=(20, 5))
         self.make_subtitle_label("Menu Principal", pady=(0, 20))
@@ -193,13 +204,22 @@ class SeiApp(BaseApp):
         frame_etapas = self.make_section_frame()
         self.make_primary_button(
             frame_etapas, text="PROCESSAR PROCESSOS",
-            command=self.show_siafe_login_frame
+            command=self._iniciar_processar_processos
         ).pack(pady=10)
         self.make_primary_button(
             frame_etapas, text="RESPONDER PROCESSOS",
             command=lambda: self.iniciar_operacao_thread("etapa2", "Responder Processos")
         ).pack(pady=10)
         self._add_footer()
+
+    def _iniciar_processar_processos(self):
+
+        # se o siafe ja foi logado com sucesso nesta sessao, pula a tela de
+        # login e roda a etapa 1 direto; senao, pede o login primeiro
+        if self.siafe_usuario and self.siafe_senha:
+            self.iniciar_operacao_thread("etapa1", "Processar Processos")
+        else:
+            self.show_siafe_login_frame()
 
     def show_siafe_login_frame(self):
 
@@ -240,8 +260,8 @@ class SeiApp(BaseApp):
     def processar_login_siafe(self, usuario_digitado, senha_digitada):
 
         # guarda as credenciais do siafe, restaura o cfg do sei e dispara a etapa 1
-        self._usuario = usuario_digitado
-        self._senha = senha_digitada
+        self.siafe_usuario = usuario_digitado
+        self.siafe_senha = senha_digitada
         self._restaurar_cfg_login_sei()
         self.iniciar_operacao_thread("etapa1", "Processar Processos")
 
@@ -287,7 +307,7 @@ class SeiApp(BaseApp):
                 cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
                 encoding='utf-8',
                 env=env,
@@ -298,8 +318,8 @@ class SeiApp(BaseApp):
             credenciais = {
                 "sei_user": self.sei_usuario,
                 "sei_pass": self.sei_senha,
-                "siafe_user": self._usuario,
-                "siafe_pass": self._senha,
+                "siafe_user": self.siafe_usuario,
+                "siafe_pass": self.siafe_senha,
             }
 
             process.stdin.write(json.dumps(credenciais))
@@ -346,17 +366,25 @@ class SeiApp(BaseApp):
             if not self.stop_event:
                 if ret_code == 0:
                     self.finalize_progress("Processado", "Sucesso", "Processo concluído com sucesso!", "info")
-                elif ret_code == 2:
+                elif ret_code == 1:
                     self.finalize_progress("Concluído com Alertas", "Aviso", "O processo foi concluído de forma parcial.", "info")
-                elif ret_code == 3:
-                    self.finalize_progress("Erro de Login", "Erro", "Falha ao autenticar. Verifique usuário e senha.", "error")
+                elif ret_code == 2:
+                    # falha de login do SEI (etapa1 e etapa2 so autenticam no SEI neste ponto; o SIAFE tem codigo proprio, 3)
+                    self.finalize_progress("Erro de Login", "Erro", "Falha ao autenticar no SEI. Verifique usuário e senha.", "error")
                     self.retorno_automatico = False  # evita que ele vá para o menu principal
-                    if etapa == "etapa1":
-                        # login que falhou foi o do siafe: volta pra tela de login do siafe
-                        self.after(3000, self.show_siafe_login_frame)
-                    else:
-                        # login que falhou foi o do sei: volta pra tela de login do sei
-                        self.after(3000, lambda: self.show_login_frame(on_success=self.processar_login_sei))
+                    self.after(3000, self.show_sei_login_frame)
+                elif ret_code == 3:
+                    # falha de login do SIAFE (so pode acontecer na etapa1)
+                    self.finalize_progress("Erro de Login", "Erro", "Falha ao autenticar no SIAFE. Verifique usuário e senha.", "error")
+                    self.retorno_automatico = False  # evita que ele vá para o menu principal
+                    self.siafe_usuario = ""  # limpa a credencial invalida, forcando nova tela de login
+                    self.siafe_senha = ""
+                    self.after(3000, self.show_siafe_login_frame)
+                elif ret_code == 4:
+                    self.finalize_progress("Navegador Perdido", "Erro", "A sessão do navegador foi perdida. Feche e abra o programa novamente.", "error")
+                    self.retorno_automatico = False  # não adianta tentar de novo sem reiniciar o programa
+                elif ret_code == 5:
+                    self.finalize_progress("Erro Crítico", "Erro", "Ocorreu um erro inesperado durante a automação. Consulte o log para mais detalhes.", "error")
                 else:
                     self.finalize_progress("Finalizado com Erros", "Erro", f"O processo foi finalizado com código {ret_code}.", "error")
 
