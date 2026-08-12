@@ -429,7 +429,7 @@ def etapa1_coletar(
                 }
 
     except ErroLoginSEI:
-        return {"sucesso": False, "motivo": "falha_login", "estatisticas": estatisticas}
+        return {"sucesso": False, "motivo": "falha_login_sei", "estatisticas": estatisticas}
     except Exception as e:
         log.error(f"[ETAPA 1] Erro critico: {mensagem_curta(e)}", exc_info=True)
         return {"sucesso": False, "motivo": "erro_critico", "estatisticas": estatisticas, "erro": str(e)}
@@ -505,7 +505,7 @@ def etapa2_finalizar(
                 }
 
     except ErroLoginSEI:
-        return {"sucesso": False, "motivo": "falha_login", "estatisticas": estatisticas}
+        return {"sucesso": False, "motivo": "falha_login_sei", "estatisticas": estatisticas}
     except Exception as e:
         log.error(f"[ETAPA 2] Erro critico: {mensagem_curta(e)}", exc_info=True)
         return {"sucesso": False, "motivo": "erro_critico", "estatisticas": estatisticas, "erro": str(e)}
