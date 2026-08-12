@@ -1,0 +1,13 @@
+{
+  "graph_api": {
+    "tenant_id": "<ID do tenant do Azure AD>",
+    "client_id": "<ID do aplicativo registrado no Azure>",
+    "client_secret": "<segredo do aplicativo>",
+    "conta_corporativa": "conta.corporativa@fazenda.rj.gov.br"
+  },
+  "desenvolvedores": [
+    "desenvolvedor1@fazenda.rj.gov.br",
+    "desenvolvedor2@fazenda.rj.gov.br"
+  ],
+  "webhook_teams": "https://<sua-organizacao>.webhook.office.com/webhookb2/..."
+}
