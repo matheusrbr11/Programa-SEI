@@ -276,93 +276,85 @@ def buscar_gr_no_banco(num_judicial: str) -> dict | None:
     return None
 
 
-def _executar_download_gr_siafe(
+def abrir_sessao_siafe(
+    siafe: Siafe,
     versao_siafe: int,
     siafe_usuario: str,
     siafe_senha: str,
     ano_doc: int | str,
-    valor: float,
-    acao_consulta: Callable[[Siafe], str | None],
-) -> str | None:
-    """Template Method para download de GR no SIAFE."""
+) -> None:
+    """Navega e autentica uma sessão do SIAFE para a combinação (versao_siafe, ano_doc)."""
     url = URL_SIAFE.get(versao_siafe)
     if url is None:
         raise ErroSIAFE(f"Versao SIAFE invalida: {versao_siafe}")
 
-    siafe = Siafe()
+    siafe.abrir_url(url)
+
+    if not siafe.logar_siafe(versao_siafe, siafe_usuario, siafe_senha, ano_doc):
+        raise ErroLoginSiafe("Falha no login SIAFE.")
+
+
+def _consultar_e_baixar_gr(siafe: Siafe, valor: float, acao_consulta: Callable[[Siafe], str | None]) -> str | None:
+    """Executa uma consulta (ja logada) e move o PDF baixado para PASTA_GR."""
+    pasta_downloads = Path.home() / "Downloads"
+    arquivos_antes = set(pasta_downloads.glob("*.pdf"))
+
+    num_doc = acao_consulta(siafe)
+    if not num_doc:
+        log.warning("Consulta SIAFE nao retornou numero de documento.")
+        return None
+
+    arquivo_baixado = aguardar_novo_pdf(pasta_downloads, arquivos_antes)
+    if not arquivo_baixado:
+        return None
+
+    return mover_gr_para_destino(arquivo_baixado, num_doc, valor)
+
+
+def baixar_gr_no_siafe(siafe: Siafe, registro: dict, *, primeira_consulta: bool = True) -> str | None:
+    """Download de GR quando já se conhece o num_documento (a partir de 2025).
+
+    Espera uma sessão ``siafe`` ja aberta e autenticada (ver ``abrir_sessao_siafe``)
+    para a versao/ano corretos. ``primeira_consulta`` deve ser False a partir da
+    2ª consulta dentro do mesmo grupo (versao_siafe, ano) — o painel de filtro
+    do SIAFE fica aberto entre consultas na mesma sessão.
+    """
     try:
-        siafe.abrir_driver(tempo_wait=20)
-        siafe.abrir_url(url)
+        num_doc = registro["num_documento"]
 
-        pasta_downloads = Path.home() / "Downloads"
-        arquivos_antes = set(pasta_downloads.glob("*.pdf"))
+        def consulta_por_registro(siafe: Siafe) -> str | None:
+            return num_doc if siafe.consultar_GR_numDoc(num_doc, primeira_consulta=primeira_consulta) else None
 
-        if not siafe.logar_siafe(versao_siafe, siafe_usuario, siafe_senha, ano_doc):
-            raise ErroLoginSiafe("Falha no login SIAFE.")
-
-        num_doc = acao_consulta(siafe)
-        if not num_doc:
-            log.warning("Consulta SIAFE nao retornou numero de documento.")
-            return None
-
-        arquivo_baixado = aguardar_novo_pdf(pasta_downloads, arquivos_antes)
-        if not arquivo_baixado:
-            return None
-
-        return mover_gr_para_destino(arquivo_baixado, num_doc, valor)
-
-    except ErroLoginSiafe:
-        raise
+        return _consultar_e_baixar_gr(siafe, registro["valor"], consulta_por_registro)
     except Exception as e:
         raise ErroSIAFE(f"Erro inesperado no download SIAFE: {mensagem_curta(e)}") from e
-    finally:
-        try:
-            siafe.fechar_driver()
-        except Exception as e:
-            log.warning(f"Erro ao fechar driver SIAFE: {e}")
-
-
-
-def baixar_gr_no_siafe(
-    registro: dict, versao_siafe: int, siafe_usuario: str, siafe_senha: str
-) -> str | None:
-    """Download de GR quando já se conhece o num_documento (a partir de 2025)."""
-
-    def consulta_por_registro(siafe: Siafe) -> str | None:
-        num_doc = registro["num_documento"]
-        return num_doc if siafe.consultar_GR_numDoc(num_doc) else None
-
-    return _executar_download_gr_siafe(
-        versao_siafe=versao_siafe,
-        siafe_usuario=siafe_usuario,
-        siafe_senha=siafe_senha,
-        ano_doc=registro["num_documento"][:4],
-        valor=registro["valor"],
-        acao_consulta=consulta_por_registro,
-    )
 
 
 def baixar_gr_siafe_por_valor(
+    siafe: Siafe,
     valor_pesquisa: float,
-    ano: int,
     versao_siafe: int,
-    siafe_usuario: str,
-    siafe_senha: str,
     data_pagamento: str | None = None,
+    *,
+    primeira_consulta: bool = True,
 ) -> str | None:
-    """Download de GR via consulta por valor (anos 2016-2024)."""
+    """Download de GR via consulta por valor (anos 2016-2024).
 
-    def consulta_por_valor(siafe: Siafe) -> str | None:
-        return siafe.consultar_GR_valor(valor_pesquisa, versao_siafe, data_pagamento=data_pagamento)
+    Espera uma sessão ``siafe`` ja aberta e autenticada (ver ``abrir_sessao_siafe``)
+    para a versao/ano corretos. ``primeira_consulta`` deve ser False a partir da
+    2ª consulta dentro do mesmo grupo (versao_siafe, ano) — ver nota em
+    ``baixar_gr_no_siafe``.
+    """
+    try:
+        def consulta_por_valor(siafe: Siafe) -> str | None:
+            return siafe.consultar_GR_valor(
+                valor_pesquisa, versao_siafe, data_pagamento=data_pagamento,
+                primeira_consulta=primeira_consulta,
+            )
 
-    return _executar_download_gr_siafe(
-        versao_siafe=versao_siafe,
-        siafe_usuario=siafe_usuario,
-        siafe_senha=siafe_senha,
-        ano_doc=ano,
-        valor=valor_pesquisa,
-        acao_consulta=consulta_por_valor,
-    )
+        return _consultar_e_baixar_gr(siafe, valor_pesquisa, consulta_por_valor)
+    except Exception as e:
+        raise ErroSIAFE(f"Erro inesperado no download SIAFE: {mensagem_curta(e)}") from e
 
 
 # ---------------------------------------------------------------------------
