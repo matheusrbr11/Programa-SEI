@@ -39,6 +39,19 @@ def navegador_perdido(exc: BaseException) -> bool:
     return False
 
 
+def sessao_siafe_viva(siafe) -> bool:
+    """
+    Confirma se a sessão do driver ainda responde, consultando ``window_handles``. 
+    Usado no lote de download de GR (sub-fase B da Etapa 1) para diferenciar 
+    "GR nao encontrada" (pular item) de "navegador morreu" (abortar o lote).
+    """
+    try:
+        _ = siafe.driver.window_handles
+        return True
+    except Exception:
+        return False
+
+
 def mensagem_curta(e: Exception) -> str:
     """
     Reduz uma exceção a uma única linha, para uso no log da interface (categoria 1).
