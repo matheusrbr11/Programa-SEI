@@ -52,7 +52,7 @@ def determinar_versao_siafe(ano: int) -> tuple[int, str]:
         return 1, "SIAFE-Rio 2"
     if 2016 <= ano <= 2023:
         return 4, "SIAFE-Rio 1"
-    raise ErroValidacao(f"Ano {ano} invalido. O ano deve ser 2016 ou superior.")
+    raise ErroValidacao(f"Ano {ano} inválido. O ano deve ser 2016 ou superior.")
 
 
 def coletar_dados_processo(sei: SEI, processo: str) -> dict:
@@ -71,7 +71,7 @@ def coletar_dados_processo(sei: SEI, processo: str) -> dict:
     lista_nomes = estado["lista_nomes"]
 
     if estado["tem_gr"] and estado["tem_despacho_apos_gr"]:
-        log.info(f"Processo {processo} ja esta completo no SEI. Nada a coletar.")
+        log.info(f"Processo {processo} já está completo no SEI. Nada a coletar.")
         return {
             "processo": processo,
             "status": "concluido",
@@ -86,18 +86,18 @@ def coletar_dados_processo(sei: SEI, processo: str) -> dict:
             nome_comprovante = next(n for n in lista_nomes if "Comprovante de Resgate" in n)
             dados = extrair_dados_comprovante_do_processo(sei, nome_comprovante)
             if not dados:
-                raise ErroExtracao("Nao foi possivel extrair dados do Comprovante ja anexado.")
+                raise ErroExtracao("Não foi possível extrair dados do Comprovante já anexado.")
         else:
             candidatos = [n for n in lista_nomes if not any(tipo in n for tipo in TIPOS_NAO_PGE)]
             if not candidatos:
                 raise ErroExtracao("Nenhum documento PGE encontrado no processo.")
             dados = encontrar_dados_em_anexos(sei, candidatos)
             if not dados:
-                raise ErroExtracao("Informacoes necessarias nao encontradas em nenhum anexo.")
+                raise ErroExtracao("Informações necessárias não encontradas em nenhum anexo.")
     except (ErroExtracao, ErroProcesso):
         raise
     except Exception as e:
-        raise ErroExtracao(f"Erro inesperado ao processar anexos: {e}")
+        raise ErroExtracao(f"Erro inesperado ao processar anexo: {e}")
 
     # 3. Validar dados extraídos
     validar_dados_extraidos(dados)
@@ -139,7 +139,7 @@ def coletar_dados_processo(sei: SEI, processo: str) -> dict:
         caminho_gr = localizar_gr_em_disco(num_documento=num_doc, valor=valor_pesquisa)
 
         if caminho_gr:
-            log.info("GR ja disponivel na PASTA_GR.")
+            log.info("GR ja disponivel na pasta.")
             if not num_doc:
                 num_doc = Path(caminho_gr).name.split(" - ")[0].strip()
         else:
@@ -196,7 +196,7 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> None:
       5. Altera marcador para 'Concluido'.
     """
     processo = registro_db["processo"]
-    log.info(f"[ETAPA 2] Finalizando: {processo}")
+    log.info(f"[ETAPA 2] Respondendo: {processo}")
     sei.pesquisar_processo(processo)
 
     tem_gr = bool(registro_db.get("tem_gr", 0))
@@ -221,16 +221,16 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> None:
             except Exception as e:
                 raise ErroSEI(f"Erro ao anexar comprovante: {e}")
             if not confirmado:
-                raise ErroSEI("Comprovante nao confirmado pelo SEI.")
+                raise ErroSEI("Comprovante não confirmado pelo SEI.")
             upsert_processo(processo=processo, status="dados_coletados", tem_comprovante=1)
         else:
-            raise ErroSEI("Comprovante nao encontrado ou nome incompativel.")
+            raise ErroSEI("Comprovante não encontrado ou nome incompatível.")
 
     # 2. Anexar GR
     if caminho_gr and not tem_gr:
         caminho_gr_path = Path(caminho_gr).resolve()
         if not caminho_gr_path.exists():
-            raise ErroSEI(f"Arquivo da GR nao encontrado no disco: {caminho_gr_path}")
+            raise ErroSEI(f"Arquivo da GR não encontrado na pasta: {caminho_gr_path}")
 
         nome_arquivo_gr = caminho_gr_path.name
         if num_doc and num_doc in nome_arquivo_gr:
@@ -242,11 +242,11 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> None:
             except Exception as e:
                 raise ErroSEI(f"Erro ao anexar GR: {e}")
             if not confirmado:
-                raise ErroSEI("GR nao confirmada pelo SEI.")
+                raise ErroSEI("GR não confirmada pelo SEI.")
             upsert_processo(processo=processo, status="dados_coletados", tem_gr=1)
         else:
             raise ErroSEI(
-                f"num_doc '{num_doc}' nao encontrado no nome do arquivo '{nome_arquivo_gr}'."
+                f"Número do documento '{num_doc}' não encontrado no nome do arquivo '{nome_arquivo_gr}'."
             )
 
     # 3. Incluir despacho
@@ -254,7 +254,7 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> None:
         try:
             index_doc = sei.copiar_informacoes_documento("Guia de Recolhimento")
             if not sei.incluir_despacho(DESPACHO_PADRAO, NIVEL_ACESSO_SEI, HIPOTESE_LEGAL):
-                raise ErroSEI("Despacho nao confirmado pelo SEI.")
+                raise ErroSEI("Despacho não confirmado pelo SEI.")
 
             registro_despacho = {
                 "num_documento": num_doc or "—",
@@ -301,7 +301,7 @@ def _logar_erro_lote(processo: str, i: int, total: int, e: Exception, acao: str)
     msg = mensagem_curta(e)
 
     if navegador_perdido(e):
-        log.error(f"[{i}/{total}] {processo} navegador perdido, interrompendo lote: {msg}", exc_info=True)
+        log.error(f"[{i}/{total}] {processo} navegador encerrado, interrompendo lote: {msg}", exc_info=True)
         return True
 
     if isinstance(e, ErroProcesso):
@@ -322,7 +322,6 @@ def _persistir_resultado_coleta(processo: str, payload: dict, estatisticas: dict
             tem_despacho_apos_gr=payload.get("tem_despacho_apos_gr", 0),
         )
         estatisticas["ignorados"] += 1
-        log.info(f"{processo} ignorado (conta de pulo).")
         return
 
     if status == "concluido":
@@ -332,7 +331,7 @@ def _persistir_resultado_coleta(processo: str, payload: dict, estatisticas: dict
             tem_despacho_apos_gr=payload.get("tem_despacho_apos_gr", 0),
         )
         estatisticas["ja_prontos"] += 1
-        log.info(f"{processo} ja estava completo no SEI.")
+        log.info(f"{processo} já está completo no SEI.")
         return
 
     upsert_processo(
@@ -354,7 +353,7 @@ def _persistir_resultado_coleta(processo: str, payload: dict, estatisticas: dict
     )
     if status == "aguardando_gr":
         estatisticas["aguardando_gr"] += 1
-        log.info(f"{processo} dados coletados; GR pendente (sub-fase B).")
+        log.info(f"{processo} dados coletados; GR pendente.")
     else:
         estatisticas["coletados"] += 1
         log.info(f"{processo} dados coletados e salvos.")
@@ -365,7 +364,7 @@ def _registrar_erro_coleta(processo: str, erro: Exception, estatisticas: dict) -
     try:
         upsert_processo(processo=processo, status="erro_coleta")
     except Exception as e:
-        log.error(f"{processo} falha adicional ao gravar status de erro: {e}", exc_info=True)
+        log.error(f"{processo} erro ao gravar status de erro: {e}", exc_info=True)
     estatisticas["erros"] += 1
     estatisticas["erros_detalhe"].append({"processo": processo, "erro": str(erro)})
 
@@ -403,7 +402,7 @@ def _baixar_gr_pendentes_em_lote(siafe_usuario: str, siafe_senha: str, estatisti
         return None
 
     grupos = _agrupar_pendentes_gr(pendentes)
-    log.info(f"[ETAPA 1] {len(pendentes)} GR(s) pendente(s) em {len(grupos)} sessao(oes) SIAFE")
+    log.info(f"[ETAPA 1] {len(pendentes)} GR(s) pendente(s) em {len(grupos)} sessão(oes) SIAFE")
 
     siafe = Siafe()
     total = estatisticas["total"]
@@ -413,7 +412,7 @@ def _baixar_gr_pendentes_em_lote(siafe_usuario: str, siafe_senha: str, estatisti
 
         for idx_grupo, ((versao_siafe, ano_doc), registros) in enumerate(grupos.items()):
             log.info(
-                f"[ETAPA 1] Sessao SIAFE versao={versao_siafe} ano={ano_doc} "
+                f"[ETAPA 1] Sessão SIAFE versao={versao_siafe} ano={ano_doc} "
                 f"({len(registros)} GR(s))"
             )
             try:
@@ -646,9 +645,6 @@ def etapa2_finalizar(
         log.error(f"[ETAPA 2] Erro critico: {mensagem_curta(e)}", exc_info=True)
         return {"sucesso": False, "motivo": "erro_critico", "estatisticas": estatisticas, "erro": str(e)}
     finally:
-        # Se o navegador ja foi perdido, o erro correspondente ja foi logado
-        # acima; fechar um driver morto pode falhar de novo e nao deve gerar
-        # um segundo erro na tela/resumo do usuario.
         try:
             sei.fechar_driver()
         except Exception as e:

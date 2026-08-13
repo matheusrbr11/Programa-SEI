@@ -7,6 +7,7 @@ import logging
 import re
 
 from .config import CONTA_PROCESSAR, PADRAO_CNJ, PADRAO_DATA_EXTENSO, PADRAO_CNPJ, CNPJ_ESTADO
+from .services import consultar_conta_judicial
 from .utils import (
     buscar_regex,
     normalizar_processo_judicial,
@@ -182,8 +183,6 @@ class ExtratorOficio(ExtratorBase):
                 buscar_regex(trecho, r"CNPJ\s*(?:n[.\s]*[º°o]?)?\s*[:.-]?\s*" + PADRAO_CNPJ)
             )
 
-            log.debug(f"[Oficio] data={data_alvara}, contas={contas_unicas}, cnpj={cnpj}")
-
             if data_alvara and contas_unicas and cnpj:
                 for conta in contas_unicas:
                     resultados.append({
@@ -283,8 +282,6 @@ class ExtratorMandado(ExtratorBase):
 
             cnpj = normalizar_cnpj(buscar_regex(trecho, r"CNPJ[\s.]*:\s*" + PADRAO_CNPJ))
 
-            log.debug(f"[Mandado] data={data_alvara}, contas={contas_unicas}, cnpj={cnpj}")
-
             if data_alvara and contas_unicas and cnpj:
                 for conta in contas_unicas:
                     resultados.append({
@@ -303,9 +300,6 @@ def extrair_dados_documento(texto: str) -> dict | None:
     Orquestra a extração de dados de qualquer documento suportado.
     Ordem de prioridade: Comprovante -> Agendamento -> Oficio -> Alvara -> Mandado.
     """
-    # Import local para evitar ciclo: services usa extractors, e a fábrica
-    # precisa de services apenas para consultar a conta judicial no BB.
-    from .services import consultar_conta_judicial
 
     if not texto or not texto.strip():
         return None

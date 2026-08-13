@@ -62,7 +62,7 @@ def main() -> None:
 
         r1 = etapa1_coletar(sei_user, sei_pass, siafe_user, siafe_pass)
         if not r1["sucesso"]:
-            log.error("Etapa 1 falhou. Abortando.")
+            log.error("Erro ao processar processos SEI.")
             sys.exit(_codigo_saida_falha(r1))
         _sair_com_estatisticas(r1)
 
@@ -73,14 +73,10 @@ def main() -> None:
 
         r2 = etapa2_finalizar(sei_user, sei_pass)
         if not r2["sucesso"]:
-            log.error("Etapa 2 falhou.")
+            log.error("Erro ao responder processos SEI.")
             sys.exit(_codigo_saida_falha(r2))
         _sair_com_estatisticas(r2)
-
-    else:
-        log.error(f"Etapa desconhecida: {etapa}")
-        sys.exit(5)
-
+        
 
 if __name__ == "__main__":
     main()

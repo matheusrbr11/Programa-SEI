@@ -123,7 +123,7 @@ def converter_valor_moeda(valor_str: str | None) -> float | None:
     try:
         return float(valor_str.replace(".", "").replace(",", "."))
     except ValueError:
-        log.error(f"Nao foi possivel converter o valor '{valor_str}' para float.", exc_info=True)
+        log.error(f"Não foi possível converter o valor '{valor_str}' para float.", exc_info=True)
         return None
 
 
@@ -162,7 +162,7 @@ def aguardar_novo_pdf(pasta: Path, arquivos_antes: set[Path], timeout: int = 30)
                 return novo_pdf
             tamanho_anterior = tamanho_atual
         time.sleep(1)
-    log.warning("Timeout: nenhum PDF novo detectado na pasta Downloads.")
+    log.warning("Nenhum PDF novo detectado na pasta Downloads.")
     return None
 
 

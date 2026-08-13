@@ -1,4 +1,3 @@
-# erros do selenium que a gente trata de forma específica lá na execução da etapa 1
 from selenium.common.exceptions import NoSuchElementException, SessionNotCreatedException, InvalidSessionIdException
 import customtkinter as ctk
 from pathlib import Path
@@ -11,11 +10,10 @@ import json
 import sys
 import os
 
-# eop_ui traz a base da interface; jupiter é a lib com o siafe e integrações
 from eop_ui import AppConfig, BaseApp
 from jupiter import configurar_log, Siafe, GraphAPI
+from processar_cc.config import PASTA_LOG_GERAL
 
-# logger do app (fica pendurado no logger "jupiter" da lib)
 logger = logging.getLogger("jupiter.SEI")
 
 
@@ -109,8 +107,8 @@ class SeiApp(BaseApp):
             if self.teams_webhook:
                 self.graph.enviar_mensagem(self.teams_webhook, f"{titulo}\n\n{mensagem}", self.dev_emails)
         except Exception:
-            # se falhar o envio, não deixa isso derrubar o fechamento do app
-            logger.error("Falha ao enviar o resumo de erros aos desenvolvedores", exc_info=True)
+            # se erro no envio, não deixa isso derrubar o fechamento do app
+            logger.error("Erro ao enviar o resumo de erros aos desenvolvedores", exc_info=True)
 
     def report_callback_exception(self, exc, val, tb):
         """Erros não tratados na interface (Tkinter) — logados e capturados para o resumo."""
@@ -365,38 +363,34 @@ class SeiApp(BaseApp):
             # traduz o código de retorno num aviso pro usuário
             if not self.stop_event:
                 if ret_code == 0:
-                    self.finalize_progress("Processado", "Sucesso", "Processo concluído com sucesso!", "info")
+                    self.finalize_progress("Concluído", "Sucesso", "Processo concluído com sucesso!", "info")
                 elif ret_code == 1:
                     self.finalize_progress("Concluído com Alertas", "Aviso", "O processo foi concluído de forma parcial.", "info")
                 elif ret_code == 2:
-                    # falha de login do SEI (etapa1 e etapa2 so autenticam no SEI neste ponto; o SIAFE tem codigo proprio, 3)
-                    self.finalize_progress("Erro de Login", "Erro", "Falha ao autenticar no SEI. Verifique usuário e senha.", "error")
-                    self.retorno_automatico = False  # evita que ele vá para o menu principal
+                    self.finalize_progress("Erro de Login", "Erro", "Erro ao autenticar no SEI. Verifique usuário e senha.", "error")
+                    self.retorno_automatico = False
                     self.after(3000, self.show_sei_login_frame)
                 elif ret_code == 3:
-                    # falha de login do SIAFE (so pode acontecer na etapa1)
-                    self.finalize_progress("Erro de Login", "Erro", "Falha ao autenticar no SIAFE. Verifique usuário e senha.", "error")
-                    self.retorno_automatico = False  # evita que ele vá para o menu principal
-                    self.siafe_usuario = ""  # limpa a credencial invalida, forcando nova tela de login
+                    self.finalize_progress("Erro de Login", "Erro", "Erro ao autenticar no SIAFE. Verifique usuário e senha.", "error")
+                    self.retorno_automatico = False
+                    self.siafe_usuario = ""
                     self.siafe_senha = ""
                     self.after(3000, self.show_siafe_login_frame)
                 elif ret_code == 4:
-                    self.finalize_progress("Navegador Perdido", "Erro", "A sessão do navegador foi perdida. Feche e abra o programa novamente.", "error")
-                    self.retorno_automatico = False  # não adianta tentar de novo sem reiniciar o programa
+                    self.finalize_progress("Erro de Navegador", "Erro", "Erro de navegador. A sessão do navegador foi encerrada.", "error")
+                    self.retorno_automatico = False
                 elif ret_code == 5:
-                    self.finalize_progress("Erro Crítico", "Erro", "Ocorreu um erro inesperado durante a automação. Consulte o log para mais detalhes.", "error")
+                    self.finalize_progress("Erro Crítico", "Erro", "Ocorreu um erro inesperado durante a execução.", "error")
                 else:
                     self.finalize_progress("Finalizado com Erros", "Erro", f"O processo foi finalizado com código {ret_code}.", "error")
 
         except (NoSuchElementException, SessionNotCreatedException, InvalidSessionIdException):
-            # navegador quebrou/perdeu a sessão: não dá pra continuar
             if not self.stop_event:
-                logger.error(f"Erro crítico com o navegador — reinicie o programa ({titulo_operacao})", exc_info=True)
+                logger.error(f"Erro de Navegador", exc_info=True)
 
         except Exception:
-            # ignora o erro se foi cancelamento; senão registra pro resumo
             if not self.stop_event:
-                logger.error(f"Erro inesperado no módulo SEI ({titulo_operacao})", exc_info=True)
+                logger.error(f"Erro inesperado", exc_info=True)
 
         finally:
             # volta pra tela de execução do crédito em conta depois de alguns segundos, se estiver em retorno automático
@@ -410,8 +404,7 @@ if __name__ == "__main__":
 
     # configura os logs: um geral na rede e um só de erros na pasta local
     pasta_erros = Path(__file__).parent / "logs"
-    pasta_geral = fr"\\cifs-zone1\tesouro\Programas da SUPCONC\logs\Programa SEI"
-    caminho_geral, caminho_erros = configurar_log("Programa SEI", pasta_geral, pasta_erros, callback_interface=app.log)
+    caminho_geral, caminho_erros = configurar_log("Programa SEI", PASTA_LOG_GERAL, pasta_erros, callback_interface=app.log)
 
     # Coleta automática de todo logger.error() (do app e da biblioteca) para o resumo enviado ao fechar
     logging.getLogger("jupiter").addHandler(ColetorErros(app.erros_acumulados))

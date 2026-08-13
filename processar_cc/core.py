@@ -12,7 +12,7 @@ import logging
 import sqlite3
 import sys
 
-from .config import CAMINHO_HERMES, PROJECT_BASE_PATH, TABELA_PROCESSOS
+from .config import CAMINHO_HERMES, PASTA_LOG_GERAL, PROJECT_BASE_PATH, TABELA_PROCESSOS
 
 log = logging.getLogger("jupiter.processarCC")
 
@@ -20,8 +20,8 @@ log = logging.getLogger("jupiter.processarCC")
 # ---------------------------------------------------------------------------
 # Exceções
 # ---------------------------------------------------------------------------
-# Erros de autenticação: falha de credencial/sessão, não de UM processo
-# específico — devem interromper o lote inteiro, não apenas pular o item atual.
+
+# Erros de autenticação:
 class ErroLoginSEI(Exception):
     """Falha de autenticacao no SEI."""
     pass
@@ -32,15 +32,13 @@ class ErroLoginSiafe(Exception):
     pass
 
 
-# Base dos erros esperados durante o processamento de UM processo especifico
-# (o lote continua para o proximo item; ver _logar_erro_lote em orchestrator.py).
+# Erros do Processo:
 class ErroProcesso(Exception):
     """Erro esperado durante o processamento de um processo específico."""
     pass
 
 
-# Erros de serviço: o código não conseguiu completar a interação com o
-# sistema externo (elemento não apareceu, clique falhou, navegação quebrou).
+# Erros de Serviço:
 class ErroSEI(ErroProcesso):
     """Erro ao interagir com o SEI (anexar, despachar, bloco, marcador)."""
     pass
@@ -56,7 +54,7 @@ class ErroBB(ErroProcesso):
     pass
 
 
-# Outros
+# Erros de Negócio:
 class ErroExtracao(ErroProcesso):
     """Falha ao extrair dados de um documento/anexo."""
     pass
@@ -163,8 +161,6 @@ class PayloadColeta:
 # ---------------------------------------------------------------------------
 # Setup de ambiente do processo filho
 # ---------------------------------------------------------------------------
-PASTA_LOG_GERAL = r"\\cifs-zone1\tesouro\Programas da SUPCONC\logs\Programa SEI"
-
 _configurado = False
 
 
@@ -255,21 +251,22 @@ def upsert_processo(
     num_doc: str | None = None,
     cnpj: str | None = None,
     data_alvara: str | None = None,
-    tem_gr: int = 0,
-    tem_comprovante: int = 0,
-    tem_despacho_apos_gr: int = 0,
+    tem_gr: int | None = None,
+    tem_comprovante: int | None = None,
+    tem_despacho_apos_gr: int | None = None,
     usuario_resposta: str | None = None,
     data_hora_resposta: str | None = None,
     tempo_resposta: float | None = None,
 ) -> int:
     """
-    Insere ou atualiza um registro na tabela.
-    Flags (tem_*) nunca são revertidas de 1 para 0 (idempotência).
+    Insere ou atualiza um registro na tabela. Todo campo, inclusive as flags
+    tem_*, so entra no UPDATE se explicitamente passado (None = "nao opina
+    sobre esse campo") — quem quer marcar uma flag passa 1; quem nao esta
+    tratando dela nao passa nada, sem risco de zera-la por omissao.
     """
     with closing(_conectar_db()) as con:
         cur = con.execute(
-            f"""SELECT id, tem_gr, tem_comprovante, tem_despacho_apos_gr
-                FROM {TABELA_PROCESSOS} WHERE processo = ?""",
+            f"SELECT id FROM {TABELA_PROCESSOS} WHERE processo = ?",
             (processo,),
         )
         row = cur.fetchone()
@@ -292,6 +289,9 @@ def upsert_processo(
                 "num_doc": num_doc,
                 "cnpj": cnpj,
                 "data_alvara": data_alvara,
+                "tem_gr": tem_gr,
+                "tem_comprovante": tem_comprovante,
+                "tem_despacho_apos_gr": tem_despacho_apos_gr,
                 "usuario_resposta": usuario_resposta,
                 "data_hora_resposta": data_hora_resposta,
                 "tempo_resposta": tempo_resposta,
@@ -300,19 +300,6 @@ def upsert_processo(
                 if v is not None:
                     campos.append(f"{k} = ?")
                     valores.append(v)
-
-            # Flags: proteção contra downgrade 1 -> 0
-            flags = {
-                "tem_gr": (tem_gr, row["tem_gr"]),
-                "tem_comprovante": (tem_comprovante, row["tem_comprovante"]),
-                "tem_despacho_apos_gr": (tem_despacho_apos_gr, row["tem_despacho_apos_gr"]),
-            }
-            for k, (novo, atual) in flags.items():
-                if atual == 1 and novo == 0:
-                    log.warning(f"Tentativa de alterar {k} de 1 para 0 bloqueada para {processo}.")
-                    continue
-                campos.append(f"{k} = ?")
-                valores.append(novo)
 
             if not campos:
                 return reg_id
@@ -335,7 +322,7 @@ def upsert_processo(
             (processo, status, conta, conta_judicial, processo_judicial,
              data_pagamento, ano, valor_pesquisa, caminho_comprovante,
              caminho_gr, num_doc, cnpj, data_alvara,
-             tem_gr, tem_comprovante, tem_despacho_apos_gr,
+             tem_gr or 0, tem_comprovante or 0, tem_despacho_apos_gr or 0,
              usuario_resposta, data_hora_resposta, tempo_resposta),
         )
         con.commit()
