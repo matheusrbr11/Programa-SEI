@@ -7,7 +7,7 @@ from pathlib import Path
 import logging
 import time
 
-from jupiter import SEI
+from jupiter import SEI, Siafe
 
 from .config import (
     ORGAO_SEI_PADRAO, MARCADOR_FILTRO, CONTA_PROCESSAR, TIPOS_NAO_PGE,
@@ -23,9 +23,9 @@ from .core import (
 from .services import (
     mapear_estado_documentos, encontrar_dados_em_anexos, extrair_dados_comprovante_do_processo,
     buscar_gr_no_banco, baixar_gr_no_siafe, baixar_gr_siafe_por_valor,
-    formatar_despacho_inserido,
+    abrir_sessao_siafe, formatar_despacho_inserido,
 )
-from .utils import localizar_gr_em_disco, mensagem_curta, navegador_perdido
+from .utils import localizar_gr_em_disco, mensagem_curta, navegador_perdido, sessao_siafe_viva
 
 log = logging.getLogger("jupiter.processarCC")
 
@@ -55,9 +55,14 @@ def determinar_versao_siafe(ano: int) -> tuple[int, str]:
     raise ErroValidacao(f"Ano {ano} invalido. O ano deve ser 2016 ou superior.")
 
 
-def coletar_dados_processo(sei: SEI, processo: str, siafe_usuario: str, siafe_senha: str) -> dict:
+def coletar_dados_processo(sei: SEI, processo: str) -> dict:
     """
-    ETAPA 1 — Coleta todos os dados necessários para um processo.
+    ETAPA 1 (sub-fase A) — Coleta os dados do processo a partir do SEI (e do
+    BB, quando necessário para resolver a conta). Não acessa o SIAFE: quando
+    a GR não é encontrada localmente (banco de contabilizacoes ou disco), o
+    retorno vem com status "aguardando_gr" e os dados necessários para a
+    consulta no SIAFE, que é feita depois, em lote, na sub-fase B
+    (ver ``_baixar_gr_pendentes_em_lote``).
     """
     log.info(f"[ETAPA 1] Coletando dados: {processo}")
 
@@ -118,13 +123,13 @@ def coletar_dados_processo(sei: SEI, processo: str, siafe_usuario: str, siafe_se
     # 5. Comprovante
     caminho_comprovante = dados.get("caminho_comprovante")
 
-    # 6. GR
+    # 6. GR — só o que dá pra resolver sem o SIAFE (banco de contabilizacoes/disco)
     registro_gr = None
     num_doc = None
     caminho_gr = None
 
     if not estado["tem_gr"]:
-        versao_siafe, msg_siafe = determinar_versao_siafe(ano)
+        determinar_versao_siafe(ano)
 
         if ano >= 2025:
             registro_gr = buscar_gr_no_banco(processo_judicial)
@@ -135,24 +140,27 @@ def coletar_dados_processo(sei: SEI, processo: str, siafe_usuario: str, siafe_se
 
         if caminho_gr:
             log.info("GR ja disponivel na PASTA_GR.")
-        elif registro_gr:
-            caminho_gr = baixar_gr_no_siafe(
-                registro_gr, versao_siafe=versao_siafe,
-                siafe_usuario=siafe_usuario, siafe_senha=siafe_senha,
-            )
-            if not caminho_gr:
-                raise ErroDownload(f"PDF da GR {num_doc} nao disponivel no SIAFE-Rio 2.")
+            if not num_doc:
+                num_doc = Path(caminho_gr).name.split(" - ")[0].strip()
         else:
-            caminho_gr = baixar_gr_siafe_por_valor(
-                valor_pesquisa, ano, versao_siafe=versao_siafe,
-                siafe_usuario=siafe_usuario, siafe_senha=siafe_senha,
-                data_pagamento=data_pagamento,
-            )
-            if not caminho_gr:
-                raise ErroDownload(f"Nao foi possivel obter a GR pelo valor no {msg_siafe}.")
-
-        if caminho_gr and not num_doc:
-            num_doc = Path(caminho_gr).name.split(" - ")[0].strip()
+            # Nao encontrada localmente: fica pendente para download em lote no SIAFE
+            return {
+                "processo": processo,
+                "status": "aguardando_gr",
+                "conta": conta,
+                "conta_judicial": conta_judicial,
+                "processo_judicial": processo_judicial,
+                "data_pagamento": data_pagamento,
+                "ano": ano,
+                "valor_pesquisa": valor_pesquisa,
+                "cnpj": dados.get("cnpj"),
+                "data_alvara": dados.get("data_alvara"),
+                "caminho_comprovante": caminho_comprovante,
+                "num_doc": num_doc,
+                "tem_gr": int(estado["tem_gr"]),
+                "tem_comprovante": int(estado["tem_comprovante"]),
+                "tem_despacho_apos_gr": int(estado["tem_despacho_apos_gr"]),
+            }
 
     # 7. Retorno
     return {
@@ -328,7 +336,7 @@ def _persistir_resultado_coleta(processo: str, payload: dict, estatisticas: dict
         return
 
     upsert_processo(
-        processo=processo, status="dados_coletados",
+        processo=processo, status=status,
         conta=payload.get("conta"),
         conta_judicial=payload.get("conta_judicial"),
         processo_judicial=payload.get("processo_judicial"),
@@ -344,8 +352,12 @@ def _persistir_resultado_coleta(processo: str, payload: dict, estatisticas: dict
         tem_comprovante=payload.get("tem_comprovante", 0),
         tem_despacho_apos_gr=payload.get("tem_despacho_apos_gr", 0),
     )
-    estatisticas["coletados"] += 1
-    log.info(f"{processo} dados coletados e salvos.")
+    if status == "aguardando_gr":
+        estatisticas["aguardando_gr"] += 1
+        log.info(f"{processo} dados coletados; GR pendente (sub-fase B).")
+    else:
+        estatisticas["coletados"] += 1
+        log.info(f"{processo} dados coletados e salvos.")
 
 
 def _registrar_erro_coleta(processo: str, erro: Exception, estatisticas: dict) -> None:
@@ -358,6 +370,129 @@ def _registrar_erro_coleta(processo: str, erro: Exception, estatisticas: dict) -
     estatisticas["erros_detalhe"].append({"processo": processo, "erro": str(erro)})
 
 
+# ---------------------------------------------------------------------------
+# Etapa 1 (sub-fase B) — Download de GR em lote, agrupado por sessão SIAFE
+# ---------------------------------------------------------------------------
+def _agrupar_pendentes_gr(pendentes: list[dict]) -> dict[tuple[int, str], list[dict]]:
+    """Agrupa os registros 'aguardando_gr' por (versao_siafe, ano_doc)."""
+    grupos: dict[tuple[int, str], list[dict]] = {}
+    for reg in pendentes:
+        ano = reg["ano"]
+        versao_siafe, _ = determinar_versao_siafe(ano)
+        num_doc = reg.get("num_doc")
+        ano_doc = num_doc[:4] if num_doc else str(ano)
+
+        grupos.setdefault((versao_siafe, ano_doc), []).append(reg)
+        
+    for chave, registros in grupos.items():
+        grupos[chave] = sorted(registros, key=lambda r: r.get("num_doc") is None)
+    return grupos
+
+
+def _baixar_gr_pendentes_em_lote(siafe_usuario: str, siafe_senha: str, estatisticas: dict) -> dict | None:
+    """
+    Resolve todos os processos 'aguardando_gr' abrindo uma sessão do SIAFE
+    por grupo (versao_siafe, ano_doc).
+
+    Retorna um dict de falha se o lote deve ser interrompido 
+    (falha de login ou navegador perdido), ou None se terminou 
+    com sucesso ou erros pontuais por processo, que nao interrompem.
+    """
+    pendentes = buscar_processo_por_status("aguardando_gr")
+    if not pendentes:
+        return None
+
+    grupos = _agrupar_pendentes_gr(pendentes)
+    log.info(f"[ETAPA 1] {len(pendentes)} GR(s) pendente(s) em {len(grupos)} sessao(oes) SIAFE")
+
+    siafe = Siafe()
+    total = estatisticas["total"]
+    progresso_base = total - len(pendentes)
+    try:
+        siafe.abrir_driver(tempo_wait=20)
+
+        for idx_grupo, ((versao_siafe, ano_doc), registros) in enumerate(grupos.items()):
+            log.info(
+                f"[ETAPA 1] Sessao SIAFE versao={versao_siafe} ano={ano_doc} "
+                f"({len(registros)} GR(s))"
+            )
+            try:
+                abrir_sessao_siafe(siafe, versao_siafe, siafe_usuario, siafe_senha, ano_doc)
+                
+            except ErroLoginSiafe:
+                log.error("[ETAPA 1] Falha de login no SIAFE, interrompendo lote.")
+                return {"sucesso": False, "motivo": "falha_login_siafe", "estatisticas": estatisticas}
+            except Exception as e:
+                log.error(f"[ETAPA 1] Erro ao abrir sessao SIAFE do grupo: {mensagem_curta(e)}", exc_info=True)
+                return {"sucesso": False, "motivo": "navegador_perdido", "estatisticas": estatisticas}
+
+            for idx_reg, reg in enumerate(registros):
+                processo = reg["processo"]
+                num_doc_salvo = reg.get("num_doc")
+                primeira_consulta = idx_reg == 0
+                progresso_base += 1
+
+                if not sessao_siafe_viva(siafe):
+                    log.error(f"[ETAPA 1] Navegador SIAFE perdido, interrompendo lote antes de {processo}.")
+                    print(f"__PROGRESSO__:{progresso_base}:{total}", flush=True)
+                    return {
+                        "sucesso": False, "motivo": "navegador_perdido",
+                        "estatisticas": estatisticas,
+                    }
+
+                try:
+                    if num_doc_salvo:
+                        registro_gr = {"num_documento": num_doc_salvo, "valor": reg["valor_pesquisa"]}
+                        caminho_gr = baixar_gr_no_siafe(
+                            siafe, registro_gr, primeira_consulta=primeira_consulta,
+                        )
+                    else:
+                        caminho_gr = baixar_gr_siafe_por_valor(
+                            siafe, reg["valor_pesquisa"], versao_siafe,
+                            data_pagamento=reg.get("data_pagamento"),
+                            primeira_consulta=primeira_consulta,
+                        )
+                    num_doc = num_doc_salvo
+
+                    if not caminho_gr:
+                        raise ErroDownload(f"GR nao disponivel no SIAFE para {processo}.")
+
+                    if not num_doc:
+                        num_doc = Path(caminho_gr).name.split(" - ")[0].strip()
+
+                    upsert_processo(
+                        processo=processo, status="dados_coletados",
+                        caminho_gr=caminho_gr, num_doc=num_doc,
+                    )
+                    estatisticas["coletados"] += 1
+                    estatisticas["aguardando_gr"] -= 1
+                    log.info(f"{processo} GR obtida no SIAFE.")
+                    
+                except Exception as e:
+                    navegador_morto = navegador_perdido(e) or not sessao_siafe_viva(siafe)
+                    _logar_erro_lote(processo, progresso_base, total, e, "download de GR")
+                    if navegador_morto:
+                        return {
+                            "sucesso": False, "motivo": "navegador_perdido",
+                            "estatisticas": estatisticas,
+                        }
+                        
+                    estatisticas["erros"] += 1
+                    estatisticas["erros_detalhe"].append({"processo": processo, "erro": str(e)})
+                finally:
+                    print(f"__PROGRESSO__:{progresso_base}:{total}", flush=True)
+
+    except ErroLoginSiafe:
+        return {"sucesso": False, "motivo": "falha_login_siafe", "estatisticas": estatisticas}
+    finally:
+        try:
+            siafe.fechar_driver()
+        except Exception as e:
+            log.debug(f"[ETAPA 1] Driver SIAFE ja indisponivel ao fechar: {e}")
+
+    return None
+
+
 def etapa1_coletar(
     sei_user: str,
     sei_pass: str,
@@ -367,16 +502,17 @@ def etapa1_coletar(
     marcador_filtro: str = MARCADOR_FILTRO,
 ) -> dict:
     """
-    Orquestra a ETAPA 1 em lote:
-      1. Autentica no SEI.
-      2. Lista os processos marcados para processamento.
-      3. Para cada processo ainda nao coletado, chama coletar_dados_processo().
+    Orquestra a ETAPA 1 em lote, em duas sub-fases:
+      A. Varre o SEI: mapeia documentos, extrai dados (consultando o BB
+         quando necessario) para cada processo do marcador. GRs nao
+         encontradas localmente ficam com status 'aguardando_gr'.
+      B. Baixa as GRs pendente em lote no SIAFE.
     """
     inicializar_tabela_processos()
     sei = SEI()
     estatisticas = {
         "total": 0, "coletados": 0, "erros": 0,
-        "ignorados": 0, "ja_prontos": 0, "erros_detalhe": [],
+        "ignorados": 0, "ja_prontos": 0, "aguardando_gr": 0, "erros_detalhe": [],
     }
 
     try:
@@ -400,22 +536,22 @@ def etapa1_coletar(
 
         for i, processo in enumerate(lista_processos, start=1):
             existente = buscar_processo_por_numero(processo)
-            if existente and existente.get("status") in ("dados_coletados", "concluido"):
+            status_existente = existente.get("status") if existente else None
+            if status_existente in ("dados_coletados", "concluido"):
                 log.info(f"[{i}/{total}] {processo} ja possui dados coletados/concluido. Pulando.")
                 estatisticas["ja_prontos"] += 1
+                print(f"__PROGRESSO__:{i}:{total}", flush=True)
+                continue
+            if status_existente == "aguardando_gr":
+                log.info(f"[{i}/{total}] {processo} ja aguardando GR de execucao anterior. Pulando remapeamento.")
+                estatisticas["aguardando_gr"] += 1
                 print(f"__PROGRESSO__:{i}:{total}", flush=True)
                 continue
 
             navegador_perdido = False
             try:
-                payload = coletar_dados_processo(sei, processo, siafe_user, siafe_pass)
+                payload = coletar_dados_processo(sei, processo)
                 _persistir_resultado_coleta(processo, payload, estatisticas)
-            except ErroLoginSiafe:
-                log.error(f"[{i}/{total}] {processo} falha de login no SIAFE, interrompendo lote.")
-                return {
-                    "sucesso": False, "motivo": "falha_login_siafe",
-                    "estatisticas": estatisticas,
-                }
             except Exception as e:
                 navegador_perdido = _logar_erro_lote(processo, i, total, e, "coleta")
                 _registrar_erro_coleta(processo, e, estatisticas)
@@ -434,13 +570,13 @@ def etapa1_coletar(
         log.error(f"[ETAPA 1] Erro critico: {mensagem_curta(e)}", exc_info=True)
         return {"sucesso": False, "motivo": "erro_critico", "estatisticas": estatisticas, "erro": str(e)}
     finally:
-        # Se o navegador ja foi perdido, o erro correspondente ja foi logado
-        # acima; fechar um driver morto pode falhar de novo e nao deve gerar
-        # um segundo erro na tela/resumo do usuario.
         try:
             sei.fechar_driver()
         except Exception as e:
             log.debug(f"[ETAPA 1] Driver ja indisponivel ao fechar: {e}")
+    falha_siafe = _baixar_gr_pendentes_em_lote(siafe_user, siafe_pass, estatisticas)
+    if falha_siafe:
+        return falha_siafe
 
     return {"sucesso": True, "estatisticas": estatisticas}
 
