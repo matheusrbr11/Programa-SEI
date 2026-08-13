@@ -81,7 +81,7 @@ O Programa SEI standalone pede o login do **SEI** logo na abertura, antes do men
 
 Ambas as telas reaproveitam o mesmo componente de login do `eop_ui.BaseApp` (`show_login_frame`), alternando a identidade visual (`self.cfg`) entre uma chamada e outra — o mesmo padrão usado pelo Hermes para simular múltiplas telas de login com uma única classe de app.
 
-Falha de login do **SEI** (código de saída `3`, tanto na Etapa 1 quanto na Etapa 2 — é o único login feito no início de cada etapa) volta para a tela de login do **SEI**. Falha de login do **SIAFE** (código `5`, só pode ocorrer na Etapa 1, ao tentar baixar uma GR) volta para a tela de login do **SIAFE**, descartando a credencial guardada, sem perder o login do SEI já feito. Cancelar a tela de login do SIAFE volta para a Tela de Execução do Crédito em Conta, sem sair do módulo.
+Falha de login do **SEI** (código de saída `2`, tanto na Etapa 1 quanto na Etapa 2 — é o único login feito no início de cada etapa) volta para a tela de login do **SEI**. Falha de login do **SIAFE** (código `3`, só pode ocorrer na Etapa 1, ao tentar baixar uma GR) volta para a tela de login do **SIAFE**, descartando a credencial guardada, sem perder o login do SEI já feito. Cancelar a tela de login do SIAFE volta para a Tela de Execução do Crédito em Conta, sem sair do módulo.
 
 ---
 
@@ -262,10 +262,12 @@ Durante a execução (Etapa 1 ou Etapa 2), o botão **Cancelar** sinaliza a para
 
 O pacote `processar_cc` separa o fluxo em duas etapas (`processar_cc/orchestrator.py`), cada uma persistida no banco:
 
-1. **Etapa 1 — Coletar** (`etapa1_coletar`): para cada processo do marcador `PGE - Credito em Conta - Processar`, mapeia a árvore de documentos, extrai os dados do anexo da PGE, valida a conta, determina a versão do SIAFE conforme o ano do documento e baixa (ou localiza em disco) a Guia de Recolhimento. Grava `status="dados_coletados"` — ainda sem tocar nos anexos/despacho do processo.
+1. **Etapa 1 — Coletar** (`etapa1_coletar`), dividida em duas sub-fases para evitar abrir/logar no SIAFE-Rio uma vez por processo:
+   - **Sub-fase A** — para cada processo do marcador `PGE - Credito em Conta - Processar`, mapeia a árvore de documentos, extrai os dados do anexo da PGE (consultando o Banco do Brasil quando necessário para resolver a conta) e valida a conta. Se a Guia de Recolhimento já estiver disponível (contabilizada pelo PRJ ou já em disco), grava `status="dados_coletados"`; caso contrário, grava `status="aguardando_gr"` — ainda sem acessar o SIAFE.
+   - **Sub-fase B** — busca no banco todos os processos `aguardando_gr`, agrupa-os por combinação de versão do SIAFE e ano de exercício (o ano é fixado no momento do login, então não muda dentro da mesma sessão) e, para cada grupo, abre uma sessão do SIAFE-Rio — reaproveitando o mesmo navegador entre grupos via abas — baixando em sequência todas as GRs daquele grupo antes de passar ao próximo. Ao concluir, atualiza cada processo para `status="dados_coletados"`.
 2. **Etapa 2 — Finalizar** (`etapa2_finalizar`): busca no banco os processos com `status="dados_coletados"`, reabre a sessão do SEI, anexa comprovante e GR, inclui o despacho padrão (valor por extenso via `num2words`), inclui o processo no bloco de assinatura da COOCCB e troca o marcador para `Concluido`. Grava `status="concluido"`.
 
-Essa separação com checkpoint em banco permite retomar de onde parou caso o programa seja interrompido entre as duas etapas.
+Essa separação com checkpoint em banco permite retomar de onde parou caso o programa seja interrompido entre as etapas — inclusive entre as sub-fases A e B da Etapa 1: se a sub-fase B for interrompida (ex.: falha de login no SIAFE), os processos que já chegaram a `dados_coletados`/`aguardando_gr` na sub-fase A não são reprocessados numa nova execução.
 
 ---
 
