@@ -7,6 +7,7 @@ import undetected_chromedriver as uc
 from contextlib import closing
 from jupiter import configurar_log
 from typing import Any
+import urllib3
 import logging
 import sqlite3
 import sys
@@ -181,6 +182,7 @@ def configurar_ambiente() -> None:
         return
 
     uc.Chrome.__del__ = lambda self: None  # evita erro no __del__ do uc
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     sys.stdout.reconfigure(encoding="utf-8")
 
     configurar_log("Programa SEI", PASTA_LOG_GERAL, PROJECT_BASE_PATH / "logs")
