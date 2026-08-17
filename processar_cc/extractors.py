@@ -229,7 +229,7 @@ class ExtratorAlvaraEletronico(ExtratorBase):
 class ExtratorAlvaraLevantamento(ExtratorBase):
     """Extrai dados de Alvarás de Levantamento."""
 
-    TITULOS = ("ALVARÁ DE LEVANTAMENTO DE QUANTIA",)
+    TITULOS = ("ALVARÁ DE LEVANTAMENTO DE QUANTIA", "ALVARÁ DE LEVANTAMENTO Nº")
 
     @classmethod
     def extrair(cls, texto: str) -> list[dict]:
@@ -239,15 +239,27 @@ class ExtratorAlvaraLevantamento(ExtratorBase):
                 trecho, r"Data\s+do\s+Dep[óo]sito[\s.]*:\s*(\d{2}/\d{2}/\d{4})"
             )
             data_alvara = data_raw
+            if not data_alvara:
+                data_alvara = buscar_regex(
+                    trecho, r"assinado eletronicamente por[\s\S]{0,120}?em\s+(\d{2}/\d{2}/\d{4})"
+                )
 
             contas_raw = re.findall(
                 r"Conta\s+Judicial[\s.]*:\s*(\d+)", trecho, re.IGNORECASE
             )
+            if not contas_raw:
+                contas_raw = re.findall(
+                    r"Conta\s+Judicial\s+n[ºo°]\s*(\d+)", trecho, re.IGNORECASE
+                )
             contas_unicas = list(dict.fromkeys(contas_raw))
 
             cnpj = normalizar_cnpj(
                 buscar_regex(trecho, r"CNPJ\s+Benefici[aá]rio[\s.]*:\s*" + PADRAO_CNPJ)
             )
+            if not cnpj:
+                cnpj = normalizar_cnpj(
+                    buscar_regex(trecho, r"Favorecido[\s\S]{0,80}?CNPJ\s*n?[ºo°]?\s*[:.-]?\s*" + PADRAO_CNPJ)
+                )
             if not cnpj:
                 cnpj = normalizar_cnpj(buscar_regex(trecho, CNPJ_ESTADO))
 
@@ -271,6 +283,10 @@ class ExtratorMandado(ExtratorBase):
         resultados = []
         for trecho in cls._split_blocos(texto):
             contas = re.findall(r"CONTA:\s*(\d+)", trecho, re.IGNORECASE)
+            if not contas:
+                contas = re.findall(
+                    r"Conta[\s\S]{0,40}?judicial[\s.]*:\s*(\d{12,})", trecho, re.IGNORECASE
+                )
             contas_unicas = list(dict.fromkeys(contas))
 
             data_raw = buscar_regex(
@@ -280,7 +296,9 @@ class ExtratorMandado(ExtratorBase):
                 data_raw = buscar_regex(trecho, PADRAO_DATA_EXTENSO)
             data_alvara = converter_data_por_extenso(data_raw)
 
-            cnpj = normalizar_cnpj(buscar_regex(trecho, r"CNPJ[\s.]*:\s*" + PADRAO_CNPJ))
+            cnpj = normalizar_cnpj(
+                buscar_regex(trecho, r"(?:CPF/)?CNPJ[\s.]*:\s*" + PADRAO_CNPJ)
+            )
 
             if data_alvara and contas_unicas and cnpj:
                 for conta in contas_unicas:
