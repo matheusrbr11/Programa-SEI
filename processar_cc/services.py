@@ -252,10 +252,17 @@ def consultar_conta_judicial(lista_dados: list[dict]) -> dict | None:
 # ---------------------------------------------------------------------------
 # SIAFE — download de Guias de Recolhimento
 # ---------------------------------------------------------------------------
-def buscar_gr_no_banco(num_judicial: str) -> dict | None:
+def buscar_gr_no_banco(num_judicial: str, valor_pesquisa: float, data_pagamento: str) -> dict | None:
     """Consulta a tabela contabilizacoes (somente leitura, cacheada em memoria) no hermes.db."""
-    for row in _listar_contabilizacoes():
-        if row["num_documento"] is not None and num_judicial in (row["observacao"] or ""):
+    candidatas = [
+        row for row in _listar_contabilizacoes()
+        if row["num_documento"] is not None and num_judicial in (row["observacao"] or "")
+    ]
+    if len(candidatas) <= 1:
+        return candidatas[0] if candidatas else None
+
+    for row in candidatas:
+        if row["valor"] == valor_pesquisa and row["data"] == data_pagamento:
             return row
     return None
 

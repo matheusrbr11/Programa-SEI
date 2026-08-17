@@ -132,7 +132,7 @@ def coletar_dados_processo(sei: SEI, processo: str) -> dict:
         determinar_versao_siafe(ano)
 
         if ano >= 2025:
-            registro_gr = buscar_gr_no_banco(processo_judicial)
+            registro_gr = buscar_gr_no_banco(processo_judicial, valor_pesquisa, data_pagamento)
             if registro_gr:
                 num_doc = registro_gr["num_documento"]
 
