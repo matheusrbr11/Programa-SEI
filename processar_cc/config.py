@@ -11,9 +11,7 @@ PASTA_GR = Path(r"//cifs-zone1/tesouro/Programas da SUPCONC/GRs PRJ")
 # Banco de dados permanece o do Programa Hermes (recurso compartilhado em rede):
 # o Módulo SEI usa a tabela própria "processos_credito_conta" e também lê a
 # tabela "contabilizacoes" (GRs já contabilizadas pelo PRJ) nesse mesmo arquivo.
-# TODO: apontando para hermes_testes.db (local) enquanto em testes — reverter para o caminho de rede antes de ir para produção.
-CAMINHO_HERMES = PROJECT_BASE_PATH / "hermes_testes.db"
-# CAMINHO_HERMES = Path(r"\\cifs-zone1\tesouro\Programas da SUPCONC\Programa Hermes\base de dados\hermes.db")
+CAMINHO_HERMES = Path(r"\\cifs-zone1\tesouro\Programas da SUPCONC\Programa Hermes\base de dados\hermes.db")
 CAMINHO_DRIVER_EDGE = str(PROJECT_BASE_PATH / "driver" / "msedgedriver.exe")
 
 # ---------------------------------------------------------------------------

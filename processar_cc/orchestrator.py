@@ -268,11 +268,11 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> None:
             raise ErroSEI(f"Erro ao formatar/inserir despacho: {e}")
         upsert_processo(processo=processo, status="dados_coletados", tem_despacho_apos_gr=1)
 
-    # # 4. Bloco de assinatura
-    # try:
-    #     sei.incluir_processo_bloco(BLOCO_ASSINATURA)
-    # except Exception as e:
-    #     raise ErroSEI(f"Erro ao incluir processo no bloco de assinatura: {e}")
+    # 4. Bloco de assinatura
+    try:
+        sei.incluir_processo_bloco(BLOCO_ASSINATURA)
+    except Exception as e:
+        raise ErroSEI(f"Erro ao incluir processo no bloco de assinatura: {e}")
 
     # 5. Alterar marcador
     try:
