@@ -1,11 +1,11 @@
 from selenium.common.exceptions import NoSuchElementException, SessionNotCreatedException, InvalidSessionIdException
-import customtkinter as ctk
 from pathlib import Path
 import pandas as pd
 import subprocess
 import threading
 import traceback
 import logging
+import base64
 import json
 import sys
 import os
@@ -57,8 +57,9 @@ class SeiApp(BaseApp):
 
         self.siafeVersao = 1  # 1 = Prod | 2 = Beta | 3 = Homologação
 
-        # caminho usado pelo app: script do subprocesso de crédito em conta
+        # caminhos usados pelo app: scripts dos subprocessos de cada módulo
         self.ProcessarCCPath = self.cfg.base_path / "run_processar_cc.py"
+        self.ProcessarDJPath = self.cfg.base_path / "run_processar_dj.py"
 
         self.siafe = Siafe()             # controla o navegador/sessão do siafe (login da etapa 1)
         self.stop_event = False          # vira True quando o usuário cancela a rotina
@@ -167,26 +168,7 @@ class SeiApp(BaseApp):
 
         frame_modulos = self.make_section_frame()
         self.make_primary_button(frame_modulos, text="Crédito em Conta", command=self.show_cc_execution_frame).pack(pady=10)
-        self.make_primary_button(frame_modulos, text="Depósito Judicial", command=self.show_em_desenvolvimento_frame).pack(pady=10)
-        self._add_footer()
-
-    def show_em_desenvolvimento_frame(self):
-
-        # placeholder pra opção que ainda não foi implementada
-        self.clear_frame()
-        self.create_menu()
-        self.add_back_button(self.show_main_frame)
-        self._add_logo()
-
-        self.make_header_label("Programa SEI", pady=(20, 5))
-
-        frame_aviso = self.make_section_frame()
-        frame_aviso.pack(fill="both", expand=True, pady=40)
-
-        ctk.CTkLabel(frame_aviso, text="🚧", font=ctk.CTkFont(size=60)).pack(pady=(0, 10))
-        ctk.CTkLabel(frame_aviso, text="Módulo em Desenvolvimento", font=self.font_bold, text_color="#1f6aa5").pack(pady=(0, 10))
-        ctk.CTkLabel(frame_aviso, text="A opção 'Depósito Judicial' estará disponível\nem futuras atualizações.", font=ctk.CTkFont(size=14), text_color="gray").pack()
-
+        self.make_primary_button(frame_modulos, text="Depósito Judicial", command=self.show_dj_execution_frame).pack(pady=10)
         self._add_footer()
 
     def show_cc_execution_frame(self):
@@ -206,7 +188,7 @@ class SeiApp(BaseApp):
         ).pack(pady=10)
         self.make_primary_button(
             frame_etapas, text="RESPONDER PROCESSOS",
-            command=lambda: self.iniciar_operacao_thread("etapa2", "Responder Processos")
+            command=lambda: self.iniciar_operacao_thread("etapa2")
         ).pack(pady=10)
         self._add_footer()
 
@@ -215,7 +197,7 @@ class SeiApp(BaseApp):
         # se o siafe ja foi logado com sucesso nesta sessao, pula a tela de
         # login e roda a etapa 1 direto; senao, pede o login primeiro
         if self.siafe_usuario and self.siafe_senha:
-            self.iniciar_operacao_thread("etapa1", "Processar Processos")
+            self.iniciar_operacao_thread("etapa1")
         else:
             self.show_siafe_login_frame()
 
@@ -263,6 +245,70 @@ class SeiApp(BaseApp):
         self._restaurar_cfg_login_sei()
         self.iniciar_operacao_thread("etapa1", "Processar Processos")
 
+    def show_dj_execution_frame(self):
+
+        # tela do depósito judicial: as duas etapas do fluxo, cada uma com seu botão
+        self.clear_frame()
+        self.create_menu()
+        self.add_back_button(self.show_main_frame)
+        self._add_logo()
+        self.make_header_label("Depósito Judicial", pady=(20, 5))
+        self.make_subtitle_label("Instrução de Processos", pady=(0, 20))
+
+        frame_etapas = self.make_section_frame()
+        self.make_primary_button(
+            frame_etapas, text="PROCESSAR PROCESSOS",
+            command=self._iniciar_processar_processos_dj
+        ).pack(pady=10)
+        self.make_primary_button(
+            frame_etapas, text="RESPONDER PROCESSOS",
+            command=lambda: self.iniciar_operacao_thread_dj("etapa2")
+        ).pack(pady=10)
+        self._add_footer()
+
+    def _iniciar_processar_processos_dj(self):
+
+        # se o siafe ja foi logado com sucesso nesta sessao, pula a tela de
+        # login e roda a etapa 1 direto; senao, pede o login primeiro
+        if self.siafe_usuario and self.siafe_senha:
+            self.iniciar_operacao_thread_dj("etapa1")
+        else:
+            self.show_siafe_login_frame_dj()
+
+    def show_siafe_login_frame_dj(self):
+
+        # troca o cfg pras regras do siafe (cpf de 11 dígitos), mantendo o padrão do login
+        self.cfg_salvo_app_name = self.cfg.app_name
+        self.cfg_salvo_subtitle = self.cfg.login_subtitle
+        self.cfg_salvo_user_label = self.cfg.login_user_label
+        self.cfg_salvo_digits_only = self.cfg.user_digits_only
+        self.cfg_salvo_exact_length = self.cfg.user_exact_length
+        self.cfg_salvo_max_length = self.cfg.user_max_length
+
+        self.cfg.app_name = "Programa SEI"
+        self.cfg.login_subtitle = "⚠️ Faça Login com os dados do SIAFE-Rio. ⚠️"
+        self.cfg.login_user_label = "Usuário (CPF):"
+        self.cfg.user_digits_only = True
+        self.cfg.user_exact_length = True
+        self.cfg.user_max_length = 11
+
+        self.show_login_frame(on_success=self.processar_login_siafe_dj)
+        self.add_back_button(self._cancelar_login_siafe_dj)
+
+    def _cancelar_login_siafe_dj(self):
+
+        # volta pra tela de execução do depósito judicial, desfazendo o cfg do siafe
+        self._restaurar_cfg_login_sei()
+        self.show_dj_execution_frame()
+
+    def processar_login_siafe_dj(self, usuario_digitado, senha_digitada):
+
+        # guarda as credenciais do siafe, restaura o cfg do sei e dispara a etapa 1
+        self.siafe_usuario = usuario_digitado
+        self.siafe_senha = senha_digitada
+        self._restaurar_cfg_login_sei()
+        self.iniciar_operacao_thread_dj("etapa1", "Processar Processos")
+
 
 ### BACKEND: EXECUÇÃO DO CRÉDITO EM CONTA
 
@@ -280,15 +326,15 @@ class SeiApp(BaseApp):
         else:
             process.terminate()
 
-    def iniciar_operacao_thread(self, etapa, titulo_operacao):
+    def iniciar_operacao_thread(self, etapa):
 
         # prepara a tela de execução e roda a etapa escolhida numa thread
         self.show_execution_frame(on_cancel=lambda: self.cancelar_e_voltar(self.show_cc_execution_frame))
         self.stop_event = False
         self.retorno_automatico = True
-        threading.Thread(target=self.execucao_cc_thread, args=(etapa, titulo_operacao), daemon=True).start()
+        threading.Thread(target=self.execucao_cc_thread, args=(etapa,), daemon=True).start()
 
-    def execucao_cc_thread(self, etapa, titulo_operacao):
+    def execucao_cc_thread(self, etapa):
         process = None
         try:
             script_path = str(self.ProcessarCCPath)
@@ -337,12 +383,20 @@ class SeiApp(BaseApp):
 
                 # linhas com esse prefixo carregam o andamento pra barra de progresso
                 PREFIXO_BARRA = "__PROGRESSO__:"
+                PREFIXO_DETALHE_ERRO = "__ERRO_DETALHE__:"
                 if linha_limpa.startswith(PREFIXO_BARRA):
                     try:
                         atual, total = map(int, linha_limpa[len(PREFIXO_BARRA):].split(":"))
                         valor_barra = atual / total if total > 0 else 1
                         self.update_progress(valor_barra)
                     except ValueError:
+                        pass
+                elif linha_limpa.startswith(PREFIXO_DETALHE_ERRO):
+                    try:
+                        detalhe = base64.b64decode(linha_limpa[len(PREFIXO_DETALHE_ERRO):]).decode("utf-8")
+                        if self.erros_acumulados:
+                            self.erros_acumulados[-1]["traceback"] = detalhe
+                    except Exception:
                         pass
                 # linhas de log: tira o prefixo do nível e mostra na interface
                 elif linha_limpa.startswith(("INFO:", "WARNING:", "ERROR:")):
@@ -398,6 +452,134 @@ class SeiApp(BaseApp):
                 self.after(500000, self.show_cc_execution_frame)
 
 
+### BACKEND: EXECUÇÃO DO DEPÓSITO JUDICIAL
+
+    def iniciar_operacao_thread_dj(self, etapa):
+
+        # prepara a tela de execução e roda a etapa escolhida numa thread
+        self.show_execution_frame(on_cancel=lambda: self.cancelar_e_voltar(self.show_dj_execution_frame))
+        self.stop_event = False
+        self.retorno_automatico = True
+        threading.Thread(target=self.execucao_dj_thread, args=(etapa,), daemon=True).start()
+
+    def execucao_dj_thread(self, etapa):
+        process = None
+        try:
+            script_path = str(self.ProcessarDJPath)
+
+            # força saída sem buffer e em utf-8 pra ler o progresso em tempo real
+            env = os.environ.copy()
+            env["PYTHONUNBUFFERED"] = "1"
+            env["PYTHONIOENCODING"] = "utf-8"
+
+            cmd = [sys.executable, "-u", script_path, etapa]
+
+            # roda o script como processo filho, capturando entrada e saída
+            process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding='utf-8',
+                env=env,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            )
+
+            # passa as credenciais pro script filho via stdin (json); etapa2 não precisa do siafe
+            credenciais = {
+                "sei_user": self.sei_usuario,
+                "sei_pass": self.sei_senha,
+                "siafe_user": self.siafe_usuario,
+                "siafe_pass": self.siafe_senha,
+            }
+
+            process.stdin.write(json.dumps(credenciais))
+            process.stdin.close()
+
+            # lê a saída do script linha a linha enquanto ele roda
+            for line in process.stdout:
+                # se o usuário cancelou, mata o processo e sai do loop
+                if self.stop_event:
+                    logger.warning(">>> Rotina interrompida pelo operador <<<")
+                    self._matar_arvore_processo(process)
+                    break
+
+                linha_limpa = line.strip()
+                if not linha_limpa:
+                    continue
+
+                # linhas com esse prefixo carregam o andamento pra barra de progresso
+                PREFIXO_BARRA = "__PROGRESSO__:"
+                PREFIXO_DETALHE_ERRO = "__ERRO_DETALHE__:"
+                if linha_limpa.startswith(PREFIXO_BARRA):
+                    try:
+                        atual, total = map(int, linha_limpa[len(PREFIXO_BARRA):].split(":"))
+                        valor_barra = atual / total if total > 0 else 1
+                        self.update_progress(valor_barra)
+                    except ValueError:
+                        pass
+                elif linha_limpa.startswith(PREFIXO_DETALHE_ERRO):
+                    try:
+                        detalhe = base64.b64decode(linha_limpa[len(PREFIXO_DETALHE_ERRO):]).decode("utf-8")
+                        if self.erros_acumulados:
+                            self.erros_acumulados[-1]["traceback"] = detalhe
+                    except Exception:
+                        pass
+                # linhas de log: tira o prefixo do nível e mostra na interface
+                elif linha_limpa.startswith(("INFO:", "WARNING:", "ERROR:")):
+                    tag = linha_limpa.split(":", 1)[0] + ":"
+                    mensagem = linha_limpa[len(tag):].strip()
+
+                    self.log(mensagem)
+
+                    if "ERROR" in tag:
+                        logger.error(f"[Depósito Judicial] {mensagem}")
+
+                else:
+                    self.log(linha_limpa)
+
+            process.stdout.close()
+            ret_code = process.wait()  # espera o processo terminar e pega o código de saída
+
+            # traduz o código de retorno num aviso pro usuário
+            if not self.stop_event:
+                if ret_code == 0:
+                    self.finalize_progress("Concluído", "Sucesso", "Processo concluído com sucesso!", "info")
+                elif ret_code == 1:
+                    self.finalize_progress("Concluído com Alertas", "Aviso", "O processo foi concluído de forma parcial.", "info")
+                elif ret_code == 2:
+                    self.finalize_progress("Erro de Login", "Erro", "Erro ao autenticar no SEI. Verifique usuário e senha.", "error")
+                    self.retorno_automatico = False
+                    self.after(3000, self.show_sei_login_frame)
+                elif ret_code == 3:
+                    self.finalize_progress("Erro de Login", "Erro", "Erro ao autenticar no SIAFE. Verifique usuário e senha.", "error")
+                    self.retorno_automatico = False
+                    self.siafe_usuario = ""
+                    self.siafe_senha = ""
+                    self.after(3000, self.show_siafe_login_frame_dj)
+                elif ret_code == 4:
+                    self.finalize_progress("Erro de Navegador", "Erro", "Erro de navegador. A sessão do navegador foi encerrada.", "error")
+                    self.retorno_automatico = False
+                elif ret_code == 5:
+                    self.finalize_progress("Erro Crítico", "Erro", "Ocorreu um erro inesperado durante a execução.", "error")
+                else:
+                    self.finalize_progress("Finalizado com Erros", "Erro", f"O processo foi finalizado com código {ret_code}.", "error")
+
+        except (NoSuchElementException, SessionNotCreatedException, InvalidSessionIdException):
+            if not self.stop_event:
+                logger.error(f"Erro de Navegador", exc_info=True)
+
+        except Exception:
+            if not self.stop_event:
+                logger.error(f"Erro inesperado", exc_info=True)
+
+        finally:
+            # volta pra tela de execução do depósito judicial depois de alguns segundos, se estiver em retorno automático
+            if self.retorno_automatico:
+                self.after(500000, self.show_dj_execution_frame)
+
+
 if __name__ == "__main__":
 
     app = SeiApp()
@@ -406,8 +588,10 @@ if __name__ == "__main__":
     pasta_erros = Path(__file__).parent / "logs"
     caminho_geral, caminho_erros = configurar_log("Programa SEI", PASTA_LOG_GERAL, pasta_erros, callback_interface=app.log)
 
-    # Coleta automática de todo logger.error() (do app e da biblioteca) para o resumo enviado ao fechar
-    logging.getLogger("jupiter").addHandler(ColetorErros(app.erros_acumulados))
+    # Coleta automática de todo logger.error() (do app e da biblioteca) para o resumo enviado ao fechar.
+    coletor_erros = ColetorErros(app.erros_acumulados)
+    for nome_logger in ("jupiter", "automaweb"):
+        logging.getLogger(nome_logger).addHandler(coletor_erros)
 
     # Notificação de erros aos desenvolvedores: credenciais em config.json (gitignored).
     # Se o arquivo faltar/estiver incompleto, a notificação apenas fica desativada.
