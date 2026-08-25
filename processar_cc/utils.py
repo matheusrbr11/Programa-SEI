@@ -18,17 +18,8 @@ ERROS_NAVEGADOR_PERDIDO = (WebDriverException)
 
 
 def navegador_perdido(exc: BaseException) -> bool:
-    """
-    Verifica se a exceção (ou alguma na sua cadeia de causas) indica que o
-    navegador/sessão morreu. Necessário porque o código de negócio costuma
-    envolver a exceção original do Selenium em ErroSEI/ErroSIAFE/ErroBB
-    (``except Exception as e: raise ErroSEI(f"...: {e}") from e``), perdendo
-    o tipo na cláusula except mas preservando a causa em __cause__/__context__.
-
-    Usado tanto no loop de lote (orchestrator.py) quanto nos loops de
-    candidato (services.py), pra garantir que uma sessao morta nunca seja
-    tratada como "so pular este item e tentar o proximo".
-    """
+    """Verifica se a exceção (ou alguma na sua cadeia de causas) indica que o
+    navegador/sessão morreu."""
     vista = set()
     atual = exc
     while atual is not None and id(atual) not in vista:
@@ -40,11 +31,7 @@ def navegador_perdido(exc: BaseException) -> bool:
 
 
 def sessao_siafe_viva(siafe) -> bool:
-    """
-    Confirma se a sessão do driver ainda responde, consultando ``window_handles``. 
-    Usado no lote de download de GR (sub-fase B da Etapa 1) para diferenciar 
-    "GR nao encontrada" (pular item) de "navegador morreu" (abortar o lote).
-    """
+    """Confirma se a sessão do driver ainda responde, consultando ``window_handles``."""
     try:
         _ = siafe.driver.window_handles
         return True
@@ -53,13 +40,7 @@ def sessao_siafe_viva(siafe) -> bool:
 
 
 def mensagem_curta(e: Exception) -> str:
-    """
-    Reduz uma exceção a uma única linha, para uso no log da interface (categoria 1).
-    WebDriverException (Selenium) embute no str() o stacktrace nativo do
-    msedgedriver, multi-linha — sem isso, cada linha do traceback vira uma
-    linha solta no log exibido ao usuário. Os arquivos de log (categorias 2 e 3)
-    continuam recebendo o traceback completo via exc_info, não afetado por isto.
-    """
+    """Reduz uma exceção a uma única linha."""
     primeira_linha = str(e).strip().splitlines()[0] if str(e).strip() else type(e).__name__
     return primeira_linha.removeprefix("Message: ").rstrip()
 
@@ -128,12 +109,7 @@ def converter_valor_moeda(valor_str: str | None) -> float | None:
 
 
 def extrair_texto_pdf(caminho_pdf: str) -> str:
-    """Extrai texto de todas as páginas de um PDF.
-
-    Usa dedupe_chars para lidar com PDFs que simulam negrito duplicando
-    glifos com um offset sub-pixel (ex.: Alvará de Levantamento), o que
-    sem isso resultaria em texto como 'PPooddeerr'.
-    """
+    """Extrai texto de todas as páginas de um PDF."""
     texto = ""
     try:
         with pdfplumber.open(caminho_pdf) as pdf:
@@ -180,8 +156,7 @@ _cache_pasta_gr: list[str] | None = None
 
 def _listar_arquivos(diretorio: Path, extensao: str) -> list[str]:
     """Lista arquivos recursivamente. Para PASTA_GR, cacheia em memória
-    pelo tempo de vida do processo — só este programa escreve nela, e o
-    cache é atualizado a cada gravação via _registrar_arquivo_pasta_gr."""
+    pelo tempo de vida do processo."""
     global _cache_pasta_gr
     if diretorio == PASTA_GR:
         if _cache_pasta_gr is None:
@@ -214,17 +189,10 @@ def localizar_arquivo_em_disco(
     return None
 
 
-def localizar_gr_em_disco(num_documento: str | None = None, valor: float | None = None) -> str | None:
+def localizar_gr_em_disco(num_documento: str | None = None) -> str | None:
     """Wrapper específico para GRs."""
     if num_documento:
-        arq = localizar_arquivo_em_disco(PASTA_GR, substring=num_documento)
-        if arq:
-            return arq
-    if valor is not None:
-        valor_fmt = f"R$ {formatar_moeda(float(valor))}"
-        arq = localizar_arquivo_em_disco(PASTA_GR, substring=valor_fmt)
-        if arq:
-            return arq
+        return localizar_arquivo_em_disco(PASTA_GR, substring=num_documento)
     return None
 
 
@@ -235,7 +203,6 @@ def localizar_comprovante_em_disco(conta_judicial: str) -> str | None:
 
 def mover_gr_para_destino(arquivo_baixado: Path, num_doc: str, valor: float) -> str:
     """Renomeia e move GR para a pasta definitiva."""
-    import automaweb
     valor_fmt = formatar_moeda(float(valor))
     caminho_final = PASTA_GR / f"{num_doc} - R$ {valor_fmt}.pdf"
     automaweb.mover_arquivo(str(arquivo_baixado), str(caminho_final))

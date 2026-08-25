@@ -63,11 +63,7 @@ _cache_contabilizacoes: list[dict] | None = None
 
 
 def _listar_contabilizacoes() -> list[dict]:
-    """Le a tabela contabilizacoes uma vez e cacheia em memoria pelo tempo de
-    vida do processo. É somente leitura para este programa (quem escreve é o
-    modulo PRJ do Hermes) — no pior caso, uma contabilizacao adicionada pelo
-    Hermes durante o lote fica fora do cache, e o programa apenas baixa a GR
-    pelo SIAFE em vez de reaproveitar, sem causar nenhuma acao incorreta."""
+    """Lê a tabela contabilizacoes uma vez e cacheia em memória pelo tempo de vida do processo."""
     global _cache_contabilizacoes
     if _cache_contabilizacoes is None:
         if not CAMINHO_HERMES.exists():
@@ -87,14 +83,8 @@ def _listar_contabilizacoes() -> list[dict]:
 
 
 def _buscar_data_pagamento_por_conta(conta_judicial: str) -> str | None:
-    """
-    Busca em contabilizacoes (somente leitura) a 'Data do Pagamento' de um
-    resgate já contabilizado para a conta judicial informada.
-
-    Usado como fallback quando a data extraída do documento do processo
-    (ex.: 'Data do Depósito' do Alvará de Levantamento) está desatualizada
-    e o BB não retorna o resgate com ela.
-    """
+    """Busca em contabilizacoes (somente leitura) a 'Data do Pagamento' de um
+    resgate já contabilizado para a conta judicial informada."""
     if not conta_judicial:
         return None
 
@@ -305,10 +295,8 @@ def _consultar_e_baixar_gr(siafe: Siafe, valor: float, acao_consulta: Callable[[
 def baixar_gr_no_siafe(siafe: Siafe, registro: dict, *, primeira_consulta: bool = True) -> str | None:
     """Download de GR quando já se conhece o num_documento (a partir de 2025).
 
-    Espera uma sessão ``siafe`` ja aberta e autenticada (ver ``abrir_sessao_siafe``)
-    para a versao/ano corretos. ``primeira_consulta`` deve ser False a partir da
-    2ª consulta dentro do mesmo grupo (versao_siafe, ano) — o painel de filtro
-    do SIAFE fica aberto entre consultas na mesma sessão.
+    Espera uma sessão ``siafe`` já aberta e autenticada (ver ``abrir_sessao_siafe``)
+    para a versão/ano corretos.
     """
     try:
         num_doc = registro["num_documento"]
@@ -331,10 +319,8 @@ def baixar_gr_siafe_por_valor(
 ) -> str | None:
     """Download de GR via consulta por valor (anos 2016-2024).
 
-    Espera uma sessão ``siafe`` ja aberta e autenticada (ver ``abrir_sessao_siafe``)
-    para a versao/ano corretos. ``primeira_consulta`` deve ser False a partir da
-    2ª consulta dentro do mesmo grupo (versao_siafe, ano) — ver nota em
-    ``baixar_gr_no_siafe``.
+    Espera uma sessão ``siafe`` já aberta e autenticada (ver ``abrir_sessao_siafe``)
+    para a versão/ano corretos.
     """
     try:
         def consulta_por_valor(siafe: Siafe) -> str | None:

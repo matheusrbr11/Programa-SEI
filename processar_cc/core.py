@@ -10,7 +10,9 @@ from typing import Any
 import urllib3
 import logging
 import sqlite3
+import base64
 import sys
+import traceback
 
 from .config import CAMINHO_HERMES, PASTA_LOG_GERAL, PROJECT_BASE_PATH, TABELA_PROCESSOS
 
@@ -168,15 +170,33 @@ class FormatterSemTraceback(logging.Formatter):
     """Formatter que omite traceback para saída no console."""
 
     def format(self, record: logging.LogRecord) -> str:
-        return f"{record.levelname}: {record.getMessage()}"
+        mensagem = record.getMessage().strip()
+        primeira_linha = mensagem.splitlines()[0] if mensagem else ""
+        return f"{record.levelname}: {primeira_linha}"
+
+
+PREFIXO_DETALHE_ERRO = "__ERRO_DETALHE__:"
+
+
+class DetalheErroHandler(logging.Handler):
+    """Emite, para cada erro, uma linha extra com o detalhe completo do erro."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            partes = [record.getMessage().strip()]
+            if record.exc_info:
+                partes.append("".join(traceback.format_exception(*record.exc_info)).strip())
+            texto_completo = "\n".join(p for p in partes if p)
+            if not texto_completo:
+                return
+            codificado = base64.b64encode(texto_completo.encode("utf-8")).decode("ascii")
+            print(f"{PREFIXO_DETALHE_ERRO}{codificado}", flush=True)
+        except Exception:
+            pass  # nunca deixa o proprio logging quebrar o processo
 
 
 def configurar_ambiente() -> None:
-    """Aplica patches do selenium e liga o log do 'jupiter' no stdout.
-
-    A interface lê o stdout linha a linha e espera os prefixos INFO:/WARNING:/
-    ERROR:, então o StreamHandler abaixo não é opcional.
-    """
+    """Aplica patches do selenium e liga o log dos loggers 'jupiter' e 'automaweb' no stdout."""
     global _configurado
     if _configurado:
         return
@@ -189,7 +209,13 @@ def configurar_ambiente() -> None:
 
     stdout_handler = logging.StreamHandler(sys.stdout)
     stdout_handler.setFormatter(FormatterSemTraceback())
-    logging.getLogger("jupiter").addHandler(stdout_handler)
+
+    detalhe_handler = DetalheErroHandler()
+    detalhe_handler.setLevel(logging.ERROR)
+
+    for nome_logger in ("jupiter", "automaweb"):
+        logging.getLogger(nome_logger).addHandler(stdout_handler)
+        logging.getLogger(nome_logger).addHandler(detalhe_handler)
 
     _configurado = True
 
@@ -258,12 +284,8 @@ def upsert_processo(
     data_hora_resposta: str | None = None,
     tempo_resposta: float | None = None,
 ) -> int:
-    """
-    Insere ou atualiza um registro na tabela. Todo campo, inclusive as flags
-    tem_*, so entra no UPDATE se explicitamente passado (None = "nao opina
-    sobre esse campo") — quem quer marcar uma flag passa 1; quem nao esta
-    tratando dela nao passa nada, sem risco de zera-la por omissao.
-    """
+    """Insere ou atualiza um registro na tabela. Campos não informados (None)
+    são preservados, não sobrescritos."""
     with closing(_conectar_db()) as con:
         cur = con.execute(
             f"SELECT id FROM {TABELA_PROCESSOS} WHERE processo = ?",
@@ -330,6 +352,7 @@ def upsert_processo(
 
 
 def buscar_processo_por_status(status: str) -> list[dict]:
+    """Busca todos os registros com o status informado."""
     with closing(_conectar_db()) as con:
         cur = con.execute(
             f"SELECT * FROM {TABELA_PROCESSOS} WHERE status = ? ORDER BY id", (status,)
@@ -338,6 +361,7 @@ def buscar_processo_por_status(status: str) -> list[dict]:
 
 
 def buscar_processo_por_numero(processo: str) -> dict | None:
+    """Busca o registro do processo informado."""
     with closing(_conectar_db()) as con:
         cur = con.execute(f"SELECT * FROM {TABELA_PROCESSOS} WHERE processo = ?", (processo,))
         row = cur.fetchone()

@@ -8,9 +8,6 @@ from pathlib import Path
 PROJECT_BASE_PATH = Path(__file__).resolve().parent.parent
 PASTA_LOG_GERAL = r"\\cifs-zone1\tesouro\Programas da SUPCONC\logs\Programa SEI"
 PASTA_GR = Path(r"//cifs-zone1/tesouro/Programas da SUPCONC/GRs PRJ")
-# Banco de dados permanece o do Programa Hermes (recurso compartilhado em rede):
-# o Módulo SEI usa a tabela própria "processos_credito_conta" e também lê a
-# tabela "contabilizacoes" (GRs já contabilizadas pelo PRJ) nesse mesmo arquivo.
 CAMINHO_HERMES = Path(r"\\cifs-zone1\tesouro\Programas da SUPCONC\Programa Hermes\base de dados\hermes.db")
 CAMINHO_DRIVER_EDGE = str(PROJECT_BASE_PATH / "driver" / "msedgedriver.exe")
 

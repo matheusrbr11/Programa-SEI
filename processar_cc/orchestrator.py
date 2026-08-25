@@ -136,7 +136,7 @@ def coletar_dados_processo(sei: SEI, processo: str) -> dict:
             if registro_gr:
                 num_doc = registro_gr["num_documento"]
 
-        caminho_gr = localizar_gr_em_disco(num_documento=num_doc, valor=valor_pesquisa)
+        caminho_gr = localizar_gr_em_disco(num_documento=num_doc)
 
         if caminho_gr:
             log.info("GR ja disponivel na pasta.")
@@ -189,11 +189,11 @@ def coletar_dados_processo(sei: SEI, processo: str) -> dict:
 def finalizar_processo(sei: SEI, registro_db: dict) -> None:
     """
     ETAPA 2 — Finaliza um processo no SEI:
-      1. Anexa comprovante (se necessário).
-      2. Anexa GR (se necessário).
-      3. Inclui despacho formatado.
+      1. Anexa o comprovante de Resgate (se necessário).
+      2. Anexa a GR.
+      3. Inclui o despacho formatado.
       4. Adiciona ao bloco de assinatura.
-      5. Altera marcador para 'Concluido'.
+      5. Altera o marcador para 'Concluido'.
     """
     processo = registro_db["processo"]
     log.info(f"[ETAPA 2] Respondendo: {processo}")
@@ -209,7 +209,7 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> None:
     valor_pesquisa = registro_db.get("valor_pesquisa")
     data_pagamento = registro_db.get("data_pagamento")
 
-    # 1. Anexar comprovante
+    # 1. Anexar comprovante de Resgate
     if caminho_comprovante and not tem_comprovante:
         conta_judicial = registro_db.get("conta_judicial")
         if conta_judicial and str(conta_judicial) in Path(caminho_comprovante).name:
@@ -288,16 +288,9 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> None:
 # Orquestração pública em lote
 # ---------------------------------------------------------------------------
 def _logar_erro_lote(processo: str, i: int, total: int, e: Exception, acao: str) -> bool:
-    """
-    Loga o erro de um item do lote (aviso para ErroProcesso, esperado; erro
-    para exceções inesperadas). Retorna True se o erro indicar que o
-    navegador/sessão morreu (lote deve ser interrompido).
-
-    A mensagem em si é curta (via mensagem_curta), pois é o texto que aparece
-    na tela de execução (log da interface, sem traceback); exc_info=True
-    garante que o traceback completo da exceção real ainda vá para os
-    arquivos de log (geral e de erros), que devem ficar com o detalhe todo.
-    """
+    """Loga o erro de um item do lote (aviso para ErroProcesso, erro para
+    exceções inesperadas). Retorna True se o erro indicar que o
+    navegador/sessão morreu."""
     msg = mensagem_curta(e)
 
     if navegador_perdido(e):
