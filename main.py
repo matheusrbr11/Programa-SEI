@@ -243,7 +243,7 @@ class SeiApp(BaseApp):
         self.siafe_usuario = usuario_digitado
         self.siafe_senha = senha_digitada
         self._restaurar_cfg_login_sei()
-        self.iniciar_operacao_thread("etapa1", "Processar Processos")
+        self.iniciar_operacao_thread("etapa1")
 
     def show_dj_execution_frame(self):
 
@@ -307,7 +307,7 @@ class SeiApp(BaseApp):
         self.siafe_usuario = usuario_digitado
         self.siafe_senha = senha_digitada
         self._restaurar_cfg_login_sei()
-        self.iniciar_operacao_thread_dj("etapa1", "Processar Processos")
+        self.iniciar_operacao_thread_dj("etapa1")
 
 
 ### BACKEND: EXECUÇÃO DO CRÉDITO EM CONTA
