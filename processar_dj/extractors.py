@@ -50,6 +50,14 @@ class ExtratorBase(ABC):
         padrao = r"(?:" + "|".join(map(re.escape, cls.TITULOS)) + r")"
         return re.split(padrao, texto)[1:]
 
+    @classmethod
+    def _titulos_split(cls, texto: str) -> list[str]:
+        """Retorna, na mesma ordem/quantidade de ``_split_blocos``, qual título casou em cada bloco."""
+        if not cls.TITULOS:
+            return []
+        padrao = r"(?:" + "|".join(map(re.escape, cls.TITULOS)) + r")"
+        return re.findall(padrao, texto)
+
 
 # ---------------------------------------------------------------------------
 # Comprovante / Agendamento (BB) — lógica compartilhada
@@ -91,9 +99,13 @@ class ExtratorResgateBB(ExtratorBase):
         ano = int(data_pagamento.split("/")[-1]) if data_pagamento else None
 
         valor_str = buscar_regex(
-            bloco,
-            r"Valor[\s\S]{0,80}?L[íi]q\.?[\s\S]{0,50}?(?:Pagamento|Resgate)[\s\S]{0,30}?([\d.,]+)",
+            bloco, r"Valor\s+L[íi]q\.?\s+Pagamento\s*:\s*R?\$?\s*([\d.,]+)"
         )
+        if not valor_str:
+            valor_str = buscar_regex(
+                bloco,
+                r"Valor[\s\S]{0,80}?L[íi]q\.?[\s\S]{0,50}?(?:Pagamento|Resgate)[\s\S]{0,30}?([\d.,]+)",
+            )
         if not valor_str:
             valor_str = buscar_regex(
                 bloco,
@@ -104,6 +116,12 @@ class ExtratorResgateBB(ExtratorBase):
                 bloco, r"Valor\s+Bruto\s+Resgate\s*:\s*R?\$?\s*([\d.,]+)"
             )
         valor_pesquisa = converter_valor_moeda(valor_str)
+        valor_30 = valor_pesquisa
+
+        valor_resgate_str = buscar_regex(
+            bloco, r"Valor\s+L[íi]quido\s+Resgate\s*:\s*R?\$?\s*([\d.,]+)"
+        )
+        valor_resgate = converter_valor_moeda(valor_resgate_str) if valor_resgate_str else None
 
         match_contas = re.search(
             r"Conta(?:\(s\)|s)?\s*(?:Judicial|Resgatada)(?:\(s\))?\s*[:\-]?\s*((?:\d{10,}\s*)+)",
@@ -127,6 +145,8 @@ class ExtratorResgateBB(ExtratorBase):
             "valor_pesquisa": valor_pesquisa,
             "conta_judicial": conta_judicial,
             "contas_resgatadas": contas_resgatadas,
+            "valor_resgate": valor_resgate,
+            "valor_30": valor_30,
         }
 
     @classmethod
@@ -209,7 +229,7 @@ class ExtratorAlvaraEletronico(ExtratorBase):
     @classmethod
     def extrair(cls, texto: str) -> list[dict]:
         resultados = []
-        for trecho in cls._split_blocos(texto):
+        for titulo_encontrado, trecho in zip(cls._titulos_split(texto), cls._split_blocos(texto)):
             data_raw = buscar_regex(trecho, r"[Cc]alculado\s+em[\s.]*:\s*(\d{2}\.\d{2}\.\d{4})")
             data_alvara = data_raw.replace(".", "/") if data_raw else None
 
@@ -224,12 +244,24 @@ class ExtratorAlvaraEletronico(ExtratorBase):
             if not cnpj:
                 cnpj = normalizar_cnpj(buscar_regex(trecho, CNPJ_ESTADO))
 
+            numero_documento = buscar_regex(trecho, r"^\s*N[º°o]?\s*(\d+)")
+
+            processo_judicial = normalizar_processo_judicial(
+                buscar_regex(trecho, r"Numero\s+do\s+Processo\s*\n\s*" + PADRAO_CNJ)
+            )
+
+            reu = buscar_regex(trecho, r"Reu\.+:\s*([^\n]+?)\s+Autor")
+
             if data_alvara and cnpj and contas_unicas:
                 for conta in contas_unicas:
                     resultados.append({
                         "data_alvara": data_alvara,
                         "conta_judicial": conta.strip(),
                         "cnpj": cnpj,
+                        "titulo_documento": titulo_encontrado,
+                        "numero_documento": numero_documento,
+                        "processo_judicial": processo_judicial,
+                        "reu": reu,
                     })
         return resultados
 

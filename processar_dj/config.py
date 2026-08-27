@@ -49,7 +49,7 @@ MARCADOR_CONCLUIDO = "PGE - Deposito Judicial - Concluido"
 NOME_PDF_PGE = "Documento"
 NOME_TITULO_GR = "Guia de Recolhimento"
 NOME_TITULO_COMPROVANTE_BB = "Comprovante de Resgate"
-NOME_TITULO_COMPROVANTE_DJO = "Comprovante DJO"
+NOME_TITULO_COMPROVANTE_DJO = "Comprovante DJO - Movimento Diário"
 TITULO_DESPACHO = "À SUBAFIN,"
 DESPACHO_PADRAO = "DJT"
 BLOCO_ASSINATURA = "1240785 - Assinatura de despachos da COOCCB"
@@ -60,7 +60,7 @@ ORGAO_SEI_PADRAO = "SEFAZ"
 # ---------------------------------------------------------------------------
 NIVEL_ACESSO_SEI = "restrito"
 HIPOTESE_LEGAL = "Controle Interno (Art. 26, § 3º, da Lei nº 10.180/2001)"
-TIPOS_NAO_PGE = ("Guia de Recolhimento", "Comprovante de Resgate", "Comprovante DJO", "Despacho")
+TIPOS_NAO_PGE = ("Guia de Recolhimento", "Comprovante de Resgate", "Comprovante DJO - Movimento Diário", "Despacho")
 
 # ---------------------------------------------------------------------------
 # Banco

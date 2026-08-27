@@ -419,14 +419,18 @@ def formatar_despacho_inserido(sei: SEI, registro: dict, titulo: str, index_doc:
     except Exception:
         valor_por_extenso = "valor por extenso não calculado"
 
-    sei.formatar_despacho(
-        titulo=titulo,
-        valor=valor_formatado,
-        valor_por_extenso=valor_por_extenso,
-        data=registro.get("data", ""),
-        num_documento=registro.get("num_documento", "—"),
-        index_doc=index_doc,
-    )
+    num_documento = registro.get("num_documento", "—")
+    mapa_texto = {
+        "@tratamento_destinatario@ @cargo_destinatario@,": titulo,
+        "[valor]": valor_formatado,
+        "[valor_ext]": valor_por_extenso,
+        "[data]": registro.get("data", ""),
+        "[num_documento]": num_documento,
+        "[index_documento_gr]": index_doc,
+    }
+    mapa_links = {index_doc: index_doc}
+
+    sei.formatar_despacho(mapa_texto, mapa_links)
 
 
 def mapear_estado_documentos(sei: SEI, processo: str) -> dict:

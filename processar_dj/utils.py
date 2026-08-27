@@ -39,6 +39,15 @@ def sessao_siafe_viva(siafe) -> bool:
         return False
 
 
+def sessao_sei_viva(sei) -> bool:
+    """Confirma se a sessão do driver do SEI ainda responde, consultando ``window_handles``."""
+    try:
+        _ = sei.driver.window_handles
+        return True
+    except Exception:
+        return False
+
+
 def mensagem_curta(e: Exception) -> str:
     """Reduz uma exceção a uma única linha."""
     primeira_linha = str(e).strip().splitlines()[0] if str(e).strip() else type(e).__name__

@@ -231,6 +231,9 @@ def consultar_conta_judicial(lista_dados: list[dict]) -> dict | None:
         dados["conta_judicial"] = conta_judicial
         dados["cnpj"] = dados_oficio.get("cnpj")
         dados["data_alvara"] = dados_oficio.get("data_alvara")
+        dados["reu"] = dados_oficio.get("reu")
+        dados["titulo_documento"] = dados_oficio.get("titulo_documento")
+        dados["numero_documento"] = dados_oficio.get("numero_documento")
 
         if dados.get("conta") == CONTA_PROCESSAR:
             return dados
@@ -418,28 +421,52 @@ def extrair_dados_comprovante_do_processo(sei: SEI, nome_comprovante: str) -> di
     return ExtratorComprovante.extrair(texto_pdf)
 
 
-def formatar_despacho_inserido(sei: SEI, registro: dict, titulo: str, index_doc: str) -> None:
-    """Formata o despacho no SEI com valor por extenso."""
-    try:
-        valor_float = float(registro["valor"])
-    except (ValueError, TypeError) as e:
-        raise ErroValidacao("Valor inválido para formatação do despacho.") from e
-
-    valor_formatado = formatar_moeda(valor_float)
+def _valor_por_extenso(valor_float: float) -> str:
     try:
         valor_por_extenso = num2words(valor_float, lang="pt_BR", to="currency")
-        valor_por_extenso = valor_por_extenso.replace("catorze", "quatorze")
+        return valor_por_extenso.replace("catorze", "quatorze")
     except Exception:
-        valor_por_extenso = "valor por extenso não calculado"
+        return "valor por extenso não calculado"
 
-    sei.formatar_despacho(
-        titulo=titulo,
-        valor=valor_formatado,
-        valor_por_extenso=valor_por_extenso,
-        data=registro.get("data", ""),
-        num_documento=registro.get("num_documento", "—"),
-        index_doc=index_doc,
-    )
+
+def formatar_despacho_dj_inserido(sei: SEI, registro: dict, titulo: str, lista_nomes: list[str]) -> None:
+    """Formata o despacho de Depósito Judicial no SEI, com valores por extenso
+    e os links dos documentos (despacho inicial, comprovantes e GR) do processo."""
+    try:
+        valor_resgate_float = float(registro["valor_resgate"])
+        valor_30_float = float(registro["valor_30"])
+    except (ValueError, TypeError, KeyError) as e:
+        raise ErroValidacao("Valor inválido para formatação do despacho.") from e
+
+    index_despacho = buscar_regex(lista_nomes[0], r"(\d+)") if lista_nomes else None
+    index_comprovante = sei.copiar_informacoes_documento(NOME_TITULO_COMPROVANTE_BB)
+    index_comprovante_djo = sei.copiar_informacoes_documento(NOME_TITULO_COMPROVANTE_DJO)
+    index_gr = sei.copiar_informacoes_documento(NOME_TITULO_GR)
+
+    mapa_texto = {
+        "@tratamento_destinatario@ @cargo_destinatario@,": titulo,
+        "[index_despacho]": index_despacho or "—",
+        "[titulo_documento]": registro.get("titulo_documento") or "—",
+        "[numero_documento]": registro.get("numero_documento") or "—",
+        "[processo_judicial]": registro.get("processo_judicial") or "—",
+        "[reu]": registro.get("reu") or "—",
+        "[index_comprovante_DJO]": index_comprovante_djo or "—",
+        "[data]": registro.get("data_pagamento") or "",
+        "[conta_judicial]": registro.get("conta_judicial") or "—",
+        "[valor_resgate]": formatar_moeda(valor_resgate_float),
+        "[valor_resgate_por_extenso]": _valor_por_extenso(valor_resgate_float),
+        "[index_comprovante]": index_comprovante or "—",
+        "[valor_30]": formatar_moeda(valor_30_float),
+        "[valor_30_por_extenso]": _valor_por_extenso(valor_30_float),
+        "[data_pagamento]": registro.get("data_pagamento") or "",
+        "[num_doc]": registro.get("num_doc") or "—",
+        "[index_gr]": index_gr or "—",
+    }
+    mapa_links = {
+        v: v for v in (index_despacho, index_comprovante, index_comprovante_djo, index_gr) if v
+    }
+
+    sei.formatar_despacho(mapa_texto, mapa_links)
 
 
 def mapear_estado_documentos(sei: SEI, processo: str) -> dict:

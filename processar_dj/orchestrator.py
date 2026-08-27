@@ -24,11 +24,14 @@ from .core import (
 from .services import (
     mapear_estado_documentos, encontrar_dados_em_anexos, extrair_dados_comprovante_do_processo,
     buscar_gr_no_banco, baixar_gr_no_siafe, baixar_gr_siafe_por_valor,
-    abrir_sessao_siafe, formatar_despacho_inserido, baixar_planilha_diaria,
+    abrir_sessao_siafe, formatar_despacho_dj_inserido, baixar_planilha_diaria,
 )
 from .planilha import gerar_planilha_resgate
 from .pdf import converter_planilha_para_pdf
-from .utils import localizar_gr_em_disco, mensagem_curta, navegador_perdido, sessao_siafe_viva
+from .utils import (
+    localizar_gr_em_disco, mensagem_curta, navegador_perdido,
+    sessao_siafe_viva, sessao_sei_viva,
+)
 
 log = logging.getLogger("jupiter.processarDJ")
 
@@ -91,6 +94,13 @@ def coletar_dados_processo(sei: SEI, processo: str) -> dict:
             dados = extrair_dados_comprovante_do_processo(sei, nome_comprovante)
             if not dados:
                 raise ErroExtracao("Não foi possível extrair dados do Comprovante já anexado.")
+
+            candidatos_pge = [n for n in lista_nomes if not any(tipo in n for tipo in TIPOS_NAO_PGE)]
+            if candidatos_pge:
+                dados_pge = encontrar_dados_em_anexos(sei, candidatos_pge)
+                if dados_pge:
+                    for campo in ("reu", "titulo_documento", "numero_documento"):
+                        dados.setdefault(campo, dados_pge.get(campo))
         else:
             candidatos = [n for n in lista_nomes if not any(tipo in n for tipo in TIPOS_NAO_PGE)]
             if not candidatos:
@@ -111,6 +121,11 @@ def coletar_dados_processo(sei: SEI, processo: str) -> dict:
     processo_judicial = dados["processo_judicial"]
     data_pagamento = dados["data_pagamento"]
     ano = dados["ano"]
+    reu = dados.get("reu")
+    titulo_documento = dados.get("titulo_documento")
+    numero_documento = dados.get("numero_documento")
+    valor_resgate = dados.get("valor_resgate")
+    valor_30 = dados.get("valor_30")
 
     # 4. Validar conta de processamento
     if conta != CONTA_PROCESSAR:
@@ -179,6 +194,11 @@ def coletar_dados_processo(sei: SEI, processo: str) -> dict:
                 "caminho_comprovante": caminho_comprovante,
                 "caminho_comprovante_djo": str(caminho_comprovante_djo),
                 "num_doc": num_doc,
+                "reu": reu,
+                "titulo_documento": titulo_documento,
+                "numero_documento": numero_documento,
+                "valor_resgate": valor_resgate,
+                "valor_30": valor_30,
                 "tem_gr": int(estado["tem_gr"]),
                 "tem_comprovante": int(estado["tem_comprovante"]),
                 "tem_comprovante_djo": int(estado["tem_comprovante_djo"]),
@@ -201,6 +221,11 @@ def coletar_dados_processo(sei: SEI, processo: str) -> dict:
         "caminho_comprovante_djo": str(caminho_comprovante_djo),
         "caminho_gr": caminho_gr,
         "num_doc": num_doc,
+        "reu": reu,
+        "titulo_documento": titulo_documento,
+        "numero_documento": numero_documento,
+        "valor_resgate": valor_resgate,
+        "valor_30": valor_30,
         "tem_gr": int(estado["tem_gr"]),
         "tem_comprovante": int(estado["tem_comprovante"]),
         "tem_comprovante_djo": int(estado["tem_comprovante_djo"]),
@@ -222,7 +247,8 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> None:
     """
     processo = registro_db["processo"]
     log.info(f"[ETAPA 2] Respondendo: {processo}")
-    sei.pesquisar_processo(processo)
+    estado_inicial = mapear_estado_documentos(sei, processo)
+    lista_nomes_inicial = estado_inicial["lista_nomes"]
 
     tem_gr = bool(registro_db.get("tem_gr", 0))
     tem_comprovante = bool(registro_db.get("tem_comprovante", 0))
@@ -233,7 +259,6 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> None:
     caminho_comprovante_djo = registro_db.get("caminho_comprovante_djo")
     caminho_gr = registro_db.get("caminho_gr")
     num_doc = registro_db.get("num_doc")
-    valor_pesquisa = registro_db.get("valor_pesquisa")
     data_pagamento = registro_db.get("data_pagamento")
 
     # 1. Anexar Comprovante de Resgate
@@ -295,16 +320,21 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> None:
     # 4. Incluir despacho
     if not tem_despacho_apos_gr:
         try:
-            index_doc = sei.copiar_informacoes_documento(NOME_TITULO_GR)
             if not sei.incluir_despacho(DESPACHO_PADRAO, NIVEL_ACESSO_SEI, HIPOTESE_LEGAL):
                 raise ErroSEI("Despacho não confirmado pelo SEI.")
 
             registro_despacho = {
-                "num_documento": num_doc or "—",
-                "valor": valor_pesquisa,
-                "data": data_pagamento or "",
+                "num_doc": num_doc or "—",
+                "conta_judicial": registro_db.get("conta_judicial"),
+                "processo_judicial": registro_db.get("processo_judicial"),
+                "reu": registro_db.get("reu"),
+                "titulo_documento": registro_db.get("titulo_documento"),
+                "numero_documento": registro_db.get("numero_documento"),
+                "valor_resgate": registro_db.get("valor_resgate"),
+                "valor_30": registro_db.get("valor_30"),
+                "data_pagamento": data_pagamento or "",
             }
-            formatar_despacho_inserido(sei, registro_despacho, TITULO_DESPACHO, index_doc)
+            formatar_despacho_dj_inserido(sei, registro_despacho, TITULO_DESPACHO, lista_nomes_inicial)
         except (ErroSEI, ErroValidacao):
             raise
         except Exception as e:
@@ -330,11 +360,13 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> None:
 # ---------------------------------------------------------------------------
 # Orquestração pública em lote
 # ---------------------------------------------------------------------------
-def _logar_erro_lote(processo: str, i: int, total: int, e: Exception, acao: str) -> bool:
-    """Loga o erro de um item do lote. Retorna True se o navegador/sessão morreu."""
+def _logar_erro_lote(processo: str, i: int, total: int, e: Exception, acao: str, sei=None) -> bool:
+    """Loga o erro de um item do lote. Retorna True somente se o navegador de
+    fato não responder mais (checagem via ``sessao_sei_viva``)."""
     msg = mensagem_curta(e)
 
-    if navegador_perdido(e):
+    navegador_morto = navegador_perdido(e) and (sei is None or not sessao_sei_viva(sei))
+    if navegador_morto:
         log.error(f"[{i}/{total}] {processo} navegador encerrado, interrompendo lote: {msg}", exc_info=True)
         return True
 
@@ -384,6 +416,11 @@ def _persistir_resultado_coleta(processo: str, payload: dict, estatisticas: dict
         caminho_comprovante_djo=payload.get("caminho_comprovante_djo"),
         caminho_gr=payload.get("caminho_gr"),
         num_doc=payload.get("num_doc"),
+        reu=payload.get("reu"),
+        titulo_documento=payload.get("titulo_documento"),
+        numero_documento=payload.get("numero_documento"),
+        valor_resgate=payload.get("valor_resgate"),
+        valor_30=payload.get("valor_30"),
         tem_gr=payload.get("tem_gr", 0),
         tem_comprovante=payload.get("tem_comprovante", 0),
         tem_comprovante_djo=payload.get("tem_comprovante_djo", 0),
@@ -585,7 +622,7 @@ def etapa1_coletar(
                 payload = coletar_dados_processo(sei, processo)
                 _persistir_resultado_coleta(processo, payload, estatisticas)
             except Exception as e:
-                navegador_com_perda = _logar_erro_lote(processo, i, total, e, "coleta")
+                navegador_com_perda = _logar_erro_lote(processo, i, total, e, "coleta", sei=sei)
                 _registrar_erro_coleta(processo, e, estatisticas)
             finally:
                 print(f"__PROGRESSO__:{i}:{total}", flush=True)
@@ -662,7 +699,7 @@ def etapa2_finalizar(
             except Exception as e:
                 estatisticas["erros"] += 1
                 estatisticas["erros_detalhe"].append({"processo": processo, "erro": str(e)})
-                navegador_com_perda = _logar_erro_lote(processo, i, total, e, "finalizacao")
+                navegador_com_perda = _logar_erro_lote(processo, i, total, e, "finalizacao", sei=sei)
             finally:
                 print(f"__PROGRESSO__:{i}:{total}", flush=True)
 

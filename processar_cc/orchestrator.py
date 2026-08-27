@@ -25,7 +25,10 @@ from .services import (
     buscar_gr_no_banco, baixar_gr_no_siafe, baixar_gr_siafe_por_valor,
     abrir_sessao_siafe, formatar_despacho_inserido,
 )
-from .utils import localizar_gr_em_disco, mensagem_curta, navegador_perdido, sessao_siafe_viva
+from .utils import (
+    localizar_gr_em_disco, mensagem_curta, navegador_perdido,
+    sessao_siafe_viva, sessao_sei_viva,
+)
 
 log = logging.getLogger("jupiter.processarCC")
 
@@ -287,13 +290,13 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> None:
 # ---------------------------------------------------------------------------
 # Orquestração pública em lote
 # ---------------------------------------------------------------------------
-def _logar_erro_lote(processo: str, i: int, total: int, e: Exception, acao: str) -> bool:
-    """Loga o erro de um item do lote (aviso para ErroProcesso, erro para
-    exceções inesperadas). Retorna True se o erro indicar que o
-    navegador/sessão morreu."""
+def _logar_erro_lote(processo: str, i: int, total: int, e: Exception, acao: str, sei=None) -> bool:
+    """Loga o erro de um item do lote. Retorna True somente se o navegador de
+        fato não responder mais (checagem via ``sessao_sei_viva``)."""
     msg = mensagem_curta(e)
 
-    if navegador_perdido(e):
+    navegador_morto = navegador_perdido(e) and (sei is None or not sessao_sei_viva(sei))
+    if navegador_morto:
         log.error(f"[{i}/{total}] {processo} navegador encerrado, interrompendo lote: {msg}", exc_info=True)
         return True
 
@@ -545,7 +548,7 @@ def etapa1_coletar(
                 payload = coletar_dados_processo(sei, processo)
                 _persistir_resultado_coleta(processo, payload, estatisticas)
             except Exception as e:
-                navegador_perdido = _logar_erro_lote(processo, i, total, e, "coleta")
+                navegador_perdido = _logar_erro_lote(processo, i, total, e, "coleta", sei=sei)
                 _registrar_erro_coleta(processo, e, estatisticas)
             finally:
                 print(f"__PROGRESSO__:{i}:{total}", flush=True)
@@ -622,7 +625,7 @@ def etapa2_finalizar(
             except Exception as e:
                 estatisticas["erros"] += 1
                 estatisticas["erros_detalhe"].append({"processo": processo, "erro": str(e)})
-                navegador_perdido = _logar_erro_lote(processo, i, total, e, "finalizacao")
+                navegador_perdido = _logar_erro_lote(processo, i, total, e, "finalizacao", sei=sei)
             finally:
                 print(f"__PROGRESSO__:{i}:{total}", flush=True)
 
