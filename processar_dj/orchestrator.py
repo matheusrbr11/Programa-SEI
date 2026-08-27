@@ -160,6 +160,12 @@ def coletar_dados_processo(sei: SEI, processo: str) -> dict:
     except ErroProcesso as e:
         raise ErroExtracao(f"Erro ao converter planilha de Resgate para PDF: {mensagem_curta(e)}") from e
 
+    for caminho_xlsx in (caminho_planilha_resgate, caminho_diario):
+        try:
+            Path(caminho_xlsx).unlink(missing_ok=True)
+        except OSError as e:
+            log.warning(f"Não foi possível remover a planilha '{caminho_xlsx}': {e}")
+
     # 7. GR — só o que dá pra resolver sem o SIAFE (banco de contabilizacoes/disco)
     registro_gr = None
     num_doc = None
