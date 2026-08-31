@@ -437,6 +437,7 @@ def mapear_estado_documentos(sei: SEI, processo: str) -> dict:
     """Mapeia a árvore de documentos do SEI e retorna flags de estado."""
     try:
         sei.pesquisar_processo(processo)
+        sei.expandir_pastas()
         documentos_arvore = sei.analisar_documentos()
         lista_nomes = list(documentos_arvore.keys())
 
