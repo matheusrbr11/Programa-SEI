@@ -13,6 +13,7 @@ import sqlite3
 import base64
 
 from jupiter import Siafe, SEI
+from jupiter.seilibrary_xpaths import xpaths_processos
 import automaweb
 
 from .config import (
@@ -434,10 +435,31 @@ def formatar_despacho_inserido(sei: SEI, registro: dict, titulo: str, index_doc:
 
 
 def mapear_estado_documentos(sei: SEI, processo: str) -> dict:
-    """Mapeia a árvore de documentos do SEI e retorna flags de estado."""
+    """Mapeia a árvore de documentos do SEI e retorna flags de estado.
+
+    Inclui a flag ``acessivel``: False quando o processo não está mais na
+    caixa da coordenadoria (botão 'Incluir Documento' ausente), indicando
+    que não é possível interagir com ele (anexar, despachar etc)."""
     try:
         sei.pesquisar_processo(processo)
         sei.expandir_pastas()
+
+        try:
+            sei.sair_iframe()
+            sei.entrar_iframe(xpaths_processos.iframe_conteudo_visualizacao)
+            acessivel = sei.verifica_existe(xpaths_processos.incluir_documento, timeout=3)
+        except Exception:
+            acessivel = False
+
+        if not acessivel:
+            return {
+                "lista_nomes": [],
+                "tem_gr": False,
+                "tem_comprovante": False,
+                "tem_despacho_apos_gr": False,
+                "acessivel": False,
+            }
+
         documentos_arvore = sei.analisar_documentos()
         lista_nomes = list(documentos_arvore.keys())
 
@@ -456,6 +478,7 @@ def mapear_estado_documentos(sei: SEI, processo: str) -> dict:
             "tem_gr": tem_gr,
             "tem_comprovante": tem_comprovante,
             "tem_despacho_apos_gr": tem_despacho_apos_gr,
+            "acessivel": True,
         }
     except Exception as e:
         raise ErroSEI(f"Erro ao mapear documentos da árvore: {e}")

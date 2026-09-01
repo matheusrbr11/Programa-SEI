@@ -74,6 +74,11 @@ def coletar_dados_processo(sei: SEI, processo: str) -> dict:
 
     # 1. Mapear documentos
     estado = mapear_estado_documentos(sei, processo)
+
+    if not estado["acessivel"]:
+        log.info(f"Processo {processo} não está mais acessível na unidade. Ignorando.")
+        return {"processo": processo, "status": "ignorado"}
+
     lista_nomes = estado["lista_nomes"]
 
     if estado["tem_gr"] and estado["tem_despacho_apos_gr"]:
@@ -242,7 +247,7 @@ def coletar_dados_processo(sei: SEI, processo: str) -> dict:
 # ---------------------------------------------------------------------------
 # Etapa 2 — Finalização do processo no SEI
 # ---------------------------------------------------------------------------
-def finalizar_processo(sei: SEI, registro_db: dict) -> None:
+def finalizar_processo(sei: SEI, registro_db: dict) -> bool:
     """ETAPA 2 — Finaliza um processo no SEI:
       1. Anexa o Comprovante de Resgate (se necessário).
       2. Anexa o Comprovante DJO.
@@ -250,10 +255,19 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> None:
       4. Inclui o despacho formatado.
       5. Adiciona ao bloco de assinatura.
       6. Altera o marcador para 'Concluido'.
+
+    Retorna False (sem finalizar) quando o processo não está mais acessível
+    na unidade, e nesse caso já marca o status como 'ignorado'.
     """
     processo = registro_db["processo"]
     log.info(f"[ETAPA 2] Respondendo: {processo}")
+
     estado_inicial = mapear_estado_documentos(sei, processo)
+    if not estado_inicial["acessivel"]:
+        log.info(f"Processo {processo} não está mais acessível na unidade. Ignorando.")
+        upsert_processo(processo=processo, status="ignorado")
+        return False
+
     lista_nomes_inicial = estado_inicial["lista_nomes"]
 
     tem_gr = bool(registro_db.get("tem_gr", 0))
@@ -361,6 +375,7 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> None:
     #     raise ErroSEI(f"Erro ao alterar marcador para '{MARCADOR_CONCLUIDO}': {e}")
 
     log.info(f"Processo {processo} concluido com sucesso.")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -669,7 +684,7 @@ def etapa2_finalizar(
     """
     inicializar_tabela_processos()
     sei = SEI()
-    estatisticas = {"total": 0, "concluidos": 0, "erros": 0, "erros_detalhe": []}
+    estatisticas = {"total": 0, "concluidos": 0, "ignorados": 0, "erros": 0, "erros_detalhe": []}
 
     try:
         sei.abrir_driver(tempo_wait=20)
@@ -693,15 +708,19 @@ def etapa2_finalizar(
             navegador_com_perda = False
             inicio = time.monotonic()
             try:
-                finalizar_processo(sei, reg)
-                upsert_processo(
-                    processo=processo, status="concluido",
-                    usuario_resposta=sei_user,
-                    data_hora_resposta=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    tempo_resposta=round(time.monotonic() - inicio, 2),
-                )
-                estatisticas["concluidos"] += 1
-                log.info(f"[{i}/{total}] {processo} finalizado com sucesso.")
+                finalizado = finalizar_processo(sei, reg)
+                if finalizado:
+                    upsert_processo(
+                        processo=processo, status="concluido",
+                        usuario_resposta=sei_user,
+                        data_hora_resposta=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        tempo_resposta=round(time.monotonic() - inicio, 2),
+                    )
+                    estatisticas["concluidos"] += 1
+                    log.info(f"[{i}/{total}] {processo} finalizado com sucesso.")
+                else:
+                    estatisticas["ignorados"] += 1
+                    log.info(f"[{i}/{total}] {processo} ignorado (não acessível).")
             except Exception as e:
                 estatisticas["erros"] += 1
                 estatisticas["erros_detalhe"].append({"processo": processo, "erro": str(e)})

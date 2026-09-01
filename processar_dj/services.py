@@ -13,6 +13,7 @@ import sqlite3
 import base64
 
 from jupiter import Siafe, SEI, SharePoint
+from jupiter.seilibrary_xpaths import xpaths_processos
 import automaweb
 
 from .config import (
@@ -470,10 +471,38 @@ def formatar_despacho_dj_inserido(sei: SEI, registro: dict, titulo: str, lista_n
 
 
 def mapear_estado_documentos(sei: SEI, processo: str) -> dict:
-    """Mapeia a árvore de documentos do SEI e retorna flags de estado."""
+    """Mapeia a árvore de documentos do SEI e retorna flags de estado.
+
+    Inclui a flag ``acessivel``: False quando o processo não está mais na
+    caixa da coordenadoria (botão 'Incluir Documento' ausente), indicando
+    que não é possível interagir com ele (anexar, despachar etc)."""
     try:
         sei.pesquisar_processo(processo)
         sei.expandir_pastas()
+
+        try:
+            sei.sair_iframe()
+            sei.entrar_iframe(xpaths_processos.iframe_conteudo_visualizacao)
+            acessivel = sei.verifica_existe(xpaths_processos.incluir_documento, timeout=3)
+        except Exception as e:
+            log.warning(f"[DEBUG acessibilidade] Erro ao entrar no iframe/checar botão: {e}")
+            acessivel = False
+
+        if not acessivel:
+            try:
+                trecho = sei.driver.find_element("tag name", "body").text[:500]
+                log.warning(f"[DEBUG acessibilidade] Botão não encontrado. URL={sei.driver.current_url} | body(500)={trecho!r}")
+            except Exception as e:
+                log.warning(f"[DEBUG acessibilidade] Falha ao capturar debug do body: {e}")
+            return {
+                "lista_nomes": [],
+                "tem_gr": False,
+                "tem_comprovante": False,
+                "tem_comprovante_djo": False,
+                "tem_despacho_apos_gr": False,
+                "acessivel": False,
+            }
+
         documentos_arvore = sei.analisar_documentos()
         lista_nomes = list(documentos_arvore.keys())
 
@@ -494,6 +523,7 @@ def mapear_estado_documentos(sei: SEI, processo: str) -> dict:
             "tem_comprovante": tem_comprovante,
             "tem_comprovante_djo": tem_comprovante_djo,
             "tem_despacho_apos_gr": tem_despacho_apos_gr,
+            "acessivel": True,
         }
     except Exception as e:
         raise ErroSEI(f"Erro ao mapear documentos da árvore: {e}")
