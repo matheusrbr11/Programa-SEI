@@ -477,6 +477,14 @@ def mapear_estado_documentos(sei: SEI, processo: str) -> dict:
     caixa da coordenadoria (botão 'Incluir Documento' ausente), indicando
     que não é possível interagir com ele (anexar, despachar etc)."""
     try:
+        # Reseta o contexto do driver antes de pesquisar: se o processo
+        # anterior falhou e deixou o driver preso dentro de um iframe, a
+        # pesquisa rápida (que vive na página principal) nunca seria
+        # encontrada e travaria em timeout indefinidamente.
+        try:
+            sei.sair_iframe()
+        except Exception:
+            pass
         sei.pesquisar_processo(processo)
         sei.expandir_pastas()
 

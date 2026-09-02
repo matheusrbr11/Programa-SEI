@@ -441,6 +441,8 @@ def mapear_estado_documentos(sei: SEI, processo: str) -> dict:
     caixa da coordenadoria (botão 'Incluir Documento' ausente), indicando
     que não é possível interagir com ele (anexar, despachar etc)."""
     try:
+        try: sei.sair_iframe()
+        except Exception: pass
         sei.pesquisar_processo(processo)
         sei.expandir_pastas()
 
