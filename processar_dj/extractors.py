@@ -137,6 +137,12 @@ class ExtratorResgateBB(ExtratorBase):
 
         conta_final = cls._identificar_conta_destino(bloco)
 
+        data_alvara = buscar_regex(bloco, r"Data\s+do\s+Alv[aá]r[aá]\s*:\s*(\d{2}/\d{2}/\d{4})")
+        numero_documento = buscar_regex(bloco, r"Numero\s+do\s+Alv[aá]r[aá]\s*:\s*(\S+)")
+        cnpj = normalizar_cnpj(
+            buscar_regex(bloco, r"Titular\s+da\s+Conta[\s\S]{0,80}?CPF/CNPJ\s*:\s*" + PADRAO_CNPJ)
+        )
+
         return {
             "conta": conta_final,
             "processo_judicial": processo_judicial,
@@ -147,6 +153,9 @@ class ExtratorResgateBB(ExtratorBase):
             "contas_resgatadas": contas_resgatadas,
             "valor_resgate": valor_resgate,
             "valor_30": valor_30,
+            "data_alvara": data_alvara,
+            "numero_documento": numero_documento,
+            "cnpj": cnpj,
         }
 
     @classmethod
@@ -211,12 +220,28 @@ class ExtratorOficio(ExtratorBase):
                 buscar_regex(trecho, r"CNPJ\s*(?:n[.\s]*[º°o]?)?\s*[:.-]?\s*" + PADRAO_CNPJ)
             )
 
+            numero_documento = buscar_regex(trecho, r"N[º°o]?\s*do\s+Of[íi]cio\s*:\s*([\d/A-Z]+)")
+
+            reu = buscar_regex(trecho, r"Executado[\s.:]*([^\n]+)")
+            if not reu:
+                reu = buscar_regex(texto, r"Nome\s*:\s*([^\n]+?)\s+CPF/CNPJ\s*:")
+            if reu:
+                reu = reu.strip()
+
+            processo_judicial = normalizar_processo_judicial(
+                buscar_regex(trecho, r"Processo\s+N[º°o]?[\s.:]*" + PADRAO_CNJ)
+            )
+
             if data_alvara and contas_unicas and cnpj:
                 for conta in contas_unicas:
                     resultados.append({
                         "data_alvara": data_alvara,
                         "conta_judicial": conta,
                         "cnpj": cnpj,
+                        "titulo_documento": "Ofício",
+                        "numero_documento": numero_documento,
+                        "processo_judicial": processo_judicial,
+                        "reu": reu,
                     })
         return resultados
 
@@ -250,7 +275,11 @@ class ExtratorAlvaraEletronico(ExtratorBase):
                 buscar_regex(trecho, r"Numero\s+do\s+Processo\s*\n\s*" + PADRAO_CNJ)
             )
 
-            reu = buscar_regex(trecho, r"Reu\.+:\s*([^\n]+?)\s+Autor")
+            reu = buscar_regex(texto, r"Nome\s*:\s*([^\n]+?)\s+CPF/CNPJ\s*:")
+            if not reu:
+                reu = buscar_regex(trecho, r"Reu\.+:\s*([^\n]+?)\s*Autor")
+            if reu:
+                reu = reu.strip()
 
             if data_alvara and cnpj and contas_unicas:
                 for conta in contas_unicas:
@@ -356,29 +385,40 @@ class ExtratorMandado(ExtratorBase):
 def extrair_dados_documento(texto: str) -> dict | None:
     """
     Orquestra a extração de dados de qualquer documento suportado.
-    Ordem de prioridade: Comprovante -> Agendamento -> Oficio -> Alvara -> Mandado.
+    
+    Ordem de prioridade: Alvara Eletronico -> Alvara Levantamento (exclusivos)
+    -> Oficio -> Mandado -> Comprovante -> Agendamento (acumulam).
     """
 
     if not texto or not texto.strip():
         return None
 
-    # 1. Comprovante / Agendamento (documento principal)
-    if ExtratorComprovante.pode_extrair(texto):
-        return ExtratorComprovante.extrair(texto)
-    if ExtratorAgendamento.pode_extrair(texto):
-        return ExtratorAgendamento.extrair(texto)
+    # 1. Alvará (Eletrônico ou de Levantamento) — prioridade exclusiva
+    extratores_alvara = [ExtratorAlvaraEletronico, ExtratorAlvaraLevantamento]
+    for extrator in extratores_alvara:
+        if extrator.pode_extrair(texto):
+            dados_alvara = extrator.extrair(texto)
+            if dados_alvara:
+                return consultar_conta_judicial(dados_alvara)
 
-    # 2. Documentos que exigem consulta posterior no BB
+    # 2. Demais documentos: acumulam
     dados_bb: list[dict] = []
     extratores_secundarios = [
         ExtratorOficio,
-        ExtratorAlvaraEletronico,
-        ExtratorAlvaraLevantamento,
         ExtratorMandado,
     ]
     for extrator in extratores_secundarios:
         if extrator.pode_extrair(texto):
             dados_bb.extend(extrator.extrair(texto))
+
+    if ExtratorComprovante.pode_extrair(texto):
+        dado_comprovante = ExtratorComprovante.extrair(texto)
+        if dado_comprovante:
+            dados_bb.append(dado_comprovante)
+    if ExtratorAgendamento.pode_extrair(texto):
+        dado_agendamento = ExtratorAgendamento.extrair(texto)
+        if dado_agendamento:
+            dados_bb.append(dado_agendamento)
 
     if not dados_bb:
         return None
