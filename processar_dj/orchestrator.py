@@ -24,7 +24,8 @@ from .core import (
 from .services import (
     mapear_estado_documentos, encontrar_dados_em_anexos, extrair_dados_comprovante_do_processo,
     buscar_gr_no_banco, baixar_gr_no_siafe, baixar_gr_siafe_por_valor,
-    abrir_sessao_siafe, formatar_despacho_dj_inserido, baixar_planilha_diaria,
+    abrir_sessao_siafe, formatar_despacho_dj_inserido, validar_valores_despacho_dj,
+    baixar_planilha_diaria,
 )
 from .planilha import gerar_planilha_resgate
 from .pdf import converter_planilha_para_pdf
@@ -172,7 +173,6 @@ def coletar_dados_processo(sei: SEI, processo: str) -> dict:
             log.warning(f"Não foi possível remover a planilha '{caminho_xlsx}': {e}")
 
     # 7. GR — só o que dá pra resolver sem o SIAFE (banco de contabilizacoes/disco)
-    registro_gr = None
     num_doc = None
     caminho_gr = None
 
@@ -247,7 +247,9 @@ def coletar_dados_processo(sei: SEI, processo: str) -> dict:
 # ---------------------------------------------------------------------------
 # Etapa 2 — Finalização do processo no SEI
 # ---------------------------------------------------------------------------
-def finalizar_processo(sei: SEI, registro_db: dict) -> bool:
+def finalizar_processo(
+    sei: SEI, registro_db: dict, processos_no_marcador: set[str] | None = None,
+) -> tuple[bool, bool]:
     """ETAPA 2 — Finaliza um processo no SEI:
       1. Anexa o Comprovante de Resgate (se necessário).
       2. Anexa o Comprovante DJO.
@@ -256,30 +258,43 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> bool:
       5. Adiciona ao bloco de assinatura.
       6. Altera o marcador para 'Concluido'.
 
-    Retorna False (sem finalizar) quando o processo não está mais acessível
-    na unidade, e nesse caso já marca o status como 'ignorado'.
+    Retorna (finalizado, despacho_completo):
+      - finalizado = False (sem finalizar) quando o processo não está mais
+        acessível na unidade, OU quando ``processos_no_marcador`` é
+        informado e o processo não consta mais nele (foi retirado do
+        marcador de filtro entre a Etapa 1 e a Etapa 2); em ambos os casos
+        já marca o status como 'ignorado'.
+      - despacho_completo = False quando o despacho foi incluído (nesta
+        execução ou em uma anterior) com algum dado obrigatório faltando
+        no banco, exigindo complementação manual.
     """
     processo = registro_db["processo"]
     log.info(f"[ETAPA 2] Respondendo: {processo}")
+
+    if processos_no_marcador is not None and processo not in processos_no_marcador:
+        log.info(f"Processo {processo} não está mais no marcador de filtro. Ignorando.")
+        upsert_processo(processo=processo, status="ignorado")
+        return False, True
 
     estado_inicial = mapear_estado_documentos(sei, processo)
     if not estado_inicial["acessivel"]:
         log.info(f"Processo {processo} não está mais acessível na unidade. Ignorando.")
         upsert_processo(processo=processo, status="ignorado")
-        return False
+        return False, True
 
     lista_nomes_inicial = estado_inicial["lista_nomes"]
 
-    tem_gr = bool(registro_db.get("tem_gr", 0))
-    tem_comprovante = bool(registro_db.get("tem_comprovante", 0))
-    tem_comprovante_djo = bool(registro_db.get("tem_comprovante_djo", 0))
-    tem_despacho_apos_gr = bool(registro_db.get("tem_despacho_apos_gr", 0))
+    tem_gr = estado_inicial["tem_gr"]
+    tem_comprovante = estado_inicial["tem_comprovante"]
+    tem_comprovante_djo = estado_inicial["tem_comprovante_djo"]
+    tem_despacho_apos_gr = estado_inicial["tem_despacho_apos_gr"]
 
     caminho_comprovante = registro_db.get("caminho_comprovante")
     caminho_comprovante_djo = registro_db.get("caminho_comprovante_djo")
     caminho_gr = registro_db.get("caminho_gr")
     num_doc = registro_db.get("num_doc")
     data_pagamento = registro_db.get("data_pagamento")
+    despacho_completo = True
 
     # 1. Anexar Comprovante de Resgate
     if caminho_comprovante and not tem_comprovante:
@@ -339,43 +354,50 @@ def finalizar_processo(sei: SEI, registro_db: dict) -> bool:
 
     # 4. Incluir despacho
     if not tem_despacho_apos_gr:
+        registro_despacho = {
+            "num_doc": num_doc,
+            "conta_judicial": registro_db.get("conta_judicial"),
+            "processo_judicial": registro_db.get("processo_judicial"),
+            "reu": registro_db.get("reu"),
+            "titulo_documento": registro_db.get("titulo_documento"),
+            "numero_documento": registro_db.get("numero_documento"),
+            "valor_resgate": registro_db.get("valor_resgate"),
+            "valor_30": registro_db.get("valor_30"),
+            "data_pagamento": data_pagamento or "",
+        }
+        valor_resgate_float, valor_30_float = validar_valores_despacho_dj(registro_despacho)
+
         try:
             if not sei.incluir_despacho(DESPACHO_PADRAO, NIVEL_ACESSO_SEI, HIPOTESE_LEGAL):
                 raise ErroSEI("Despacho não confirmado pelo SEI.")
 
-            registro_despacho = {
-                "num_doc": num_doc or "—",
-                "conta_judicial": registro_db.get("conta_judicial"),
-                "processo_judicial": registro_db.get("processo_judicial"),
-                "reu": registro_db.get("reu"),
-                "titulo_documento": registro_db.get("titulo_documento"),
-                "numero_documento": registro_db.get("numero_documento"),
-                "valor_resgate": registro_db.get("valor_resgate"),
-                "valor_30": registro_db.get("valor_30"),
-                "data_pagamento": data_pagamento or "",
-            }
-            formatar_despacho_dj_inserido(sei, registro_despacho, TITULO_DESPACHO, lista_nomes_inicial)
+            despacho_completo = formatar_despacho_dj_inserido(
+                sei, registro_despacho, TITULO_DESPACHO, lista_nomes_inicial,
+                valor_resgate_float, valor_30_float,
+            )
+            if not despacho_completo:
+                log.warning(f"Processo {processo}: despacho incluído com dados incompletos.")
         except (ErroSEI, ErroValidacao):
             raise
         except Exception as e:
             raise ErroSEI(f"Erro ao formatar/inserir despacho: {e}")
         upsert_processo(processo=processo, status="dados_coletados", tem_despacho_apos_gr=1)
 
-    # # 5. Bloco de assinatura
-    # try:
-    #     sei.incluir_processo_bloco(BLOCO_ASSINATURA)
-    # except Exception as e:
-    #     raise ErroSEI(f"Erro ao incluir processo no bloco de assinatura: {e}")
+    # 5. Bloco de assinatura
+    try:
+        sei.incluir_processo_bloco(BLOCO_ASSINATURA)
+    except Exception as e:
+        raise ErroSEI(f"Erro ao incluir processo no bloco de assinatura: {e}")
 
-    # # 6. Alterar marcador
-    # try:
-    #     sei.remover_marcador(processo)
-    #     sei.adicionar_marcador(MARCADOR_CONCLUIDO, processo, flag_removido=True)
-    # except Exception as e:
-    #     raise ErroSEI(f"Erro ao alterar marcador para '{MARCADOR_CONCLUIDO}': {e}")
+    # 6. Alterar marcador
+    try:
+        sei.remover_marcador(processo)
+        sei.adicionar_marcador(MARCADOR_CONCLUIDO, processo, flag_removido=True)
+    except Exception as e:
+        raise ErroSEI(f"Erro ao alterar marcador para '{MARCADOR_CONCLUIDO}': {e}")
 
     log.info(f"Processo {processo} concluido com sucesso.")
-    return True
+    return True, despacho_completo
 
 
 # ---------------------------------------------------------------------------
@@ -675,16 +697,22 @@ def etapa2_finalizar(
     sei_user: str,
     sei_pass: str,
     orgao_sei: str = ORGAO_SEI_PADRAO,
+    marcador_filtro: str = MARCADOR_FILTRO,
 ) -> dict:
     """
     Orquestra a ETAPA 2 em lote:
       1. Autentica no SEI.
       2. Busca todos os processos com status 'dados_coletados'.
-      3. Para cada um, chama finalizar_processo().
+      3. Para cada um, chama finalizar_processo() — pulando quem não
+         estiver mais no marcador de filtro (pode ter sido retirado dele
+         manualmente entre a Etapa 1 e a Etapa 2).
     """
     inicializar_tabela_processos()
     sei = SEI()
-    estatisticas = {"total": 0, "concluidos": 0, "ignorados": 0, "erros": 0, "erros_detalhe": []}
+    estatisticas = {
+        "total": 0, "concluidos": 0, "ignorados": 0, "erros": 0,
+        "erros_detalhe": [], "despachos_parciais": [],
+    }
 
     try:
         sei.abrir_driver(tempo_wait=20)
@@ -701,6 +729,12 @@ def etapa2_finalizar(
             log.info("[ETAPA 2] Nenhum processo pendente de finalizacao.")
             return {"sucesso": True, "motivo": "vazio", "estatisticas": estatisticas}
 
+        log.info("[ETAPA 2] Verificando marcador de filtro dos processos pendentes")
+        processos_marcador = sei.visualizar_processos_por_marcador(marcador_filtro)
+        processos_no_marcador = set(
+            sei.filtrar_processos_por_marcador(processos_marcador, marcador_filtro)
+        )
+
         log.info(f"[ETAPA 2] {total} processo(s) pendente(s) de finalizacao")
 
         for i, reg in enumerate(pendentes, start=1):
@@ -708,7 +742,7 @@ def etapa2_finalizar(
             navegador_com_perda = False
             inicio = time.monotonic()
             try:
-                finalizado = finalizar_processo(sei, reg)
+                finalizado, despacho_completo = finalizar_processo(sei, reg, processos_no_marcador)
                 if finalizado:
                     upsert_processo(
                         processo=processo, status="concluido",
@@ -718,9 +752,12 @@ def etapa2_finalizar(
                     )
                     estatisticas["concluidos"] += 1
                     log.info(f"[{i}/{total}] {processo} finalizado com sucesso.")
+                    if not despacho_completo:
+                        estatisticas["despachos_parciais"].append(processo)
+                        print(f"__DESPACHO_PARCIAL__:{processo}", flush=True)
                 else:
                     estatisticas["ignorados"] += 1
-                    log.info(f"[{i}/{total}] {processo} ignorado (não acessível).")
+                    log.info(f"[{i}/{total}] {processo} ignorado (não acessível ou fora do marcador).")
             except Exception as e:
                 estatisticas["erros"] += 1
                 estatisticas["erros_detalhe"].append({"processo": processo, "erro": str(e)})
