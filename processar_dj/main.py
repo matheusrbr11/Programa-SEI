@@ -26,10 +26,19 @@ def _codigo_saida_falha(resultado: dict) -> int:
 
 def _sair_com_estatisticas(resultado: dict) -> None:
     """Encerra com 0 (sucesso) ou 1 (sucesso parcial) conforme as estatísticas."""
-    erros = resultado["estatisticas"].get("erros", 0)
+    estatisticas = resultado["estatisticas"]
+    erros = estatisticas.get("erros", 0)
     if erros:
         log.warning(f"Processamento concluido com {erros} erro(s) em itens do lote.")
         sys.exit(1)
+
+    despachos_parciais = estatisticas.get("despachos_parciais") or []
+    if despachos_parciais:
+        log.warning(
+            f"Despacho incluido com dados incompletos em {len(despachos_parciais)} "
+            f"processo(s): {', '.join(despachos_parciais)}."
+        )
+
     sys.exit(0)
 
 
