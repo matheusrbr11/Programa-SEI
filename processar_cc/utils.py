@@ -14,16 +14,13 @@ from .config import MESES, PASTA_GR
 
 log = logging.getLogger("jupiter.processarCC")
 
-ERROS_NAVEGADOR_PERDIDO = (WebDriverException)
-
-
 def navegador_perdido(exc: BaseException) -> bool:
     """Verifica se a exceção (ou alguma na sua cadeia de causas) indica que o
     navegador/sessão morreu."""
     vista = set()
     atual = exc
     while atual is not None and id(atual) not in vista:
-        if isinstance(atual, ERROS_NAVEGADOR_PERDIDO) and not isinstance(atual, NoSuchElementException):
+        if isinstance(atual, WebDriverException) and not isinstance(atual, NoSuchElementException):
             return True
         vista.add(id(atual))
         atual = atual.__cause__ or atual.__context__
