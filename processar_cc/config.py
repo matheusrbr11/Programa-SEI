@@ -20,12 +20,11 @@ URL_BB = "https://www63.bb.com.br/portalbb/djo/id/resgate/dadosResgate,802,4647,
 URL_SIAFE = {1: URL_SIAFE2, 4: URL_SIAFE1}
 
 # ---------------------------------------------------------------------------
-# Contas
+# Contas e CNPJ
 # ---------------------------------------------------------------------------
 CONTA_PROCESSAR = "00000291632-0"
-
-# CNPJ do Estado (fallback quando o documento não traz o CNPJ explicitamente)
-CNPJ_ESTADO = r"(42\.?498\.?675/0001-?52)"
+CNPJ_PRINCIPAL = "42.498.675/0001-52"
+CNPJ_ALTERNATIVO = "42.498.600/0001-71"
 
 # ---------------------------------------------------------------------------
 # Marcadores SEI
@@ -41,6 +40,7 @@ TITULO_DESPACHO = "À SUBAFIN,"
 DESPACHO_PADRAO = "DPJ"
 BLOCO_ASSINATURA = "1240785 - Assinatura de despachos da COOCCB"
 ORGAO_SEI_PADRAO = "SEFAZ"
+CAMPOS_OBRIGATORIOS_DESPACHO = ("valor", "data", "num_documento")
 
 # ---------------------------------------------------------------------------
 # SEI
@@ -75,3 +75,5 @@ PADRAO_DATA_EXTENSO = (
     r"(?:^|\n)\s*[A-Za-zÀ-ÿ\s]{3,30}?\,\s*(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})"
 )
 PADRAO_CNPJ = r"(\d{2}[\.\s]?\d{3}[\.\s]?\d{3}[\/\s]?\d{4}[\-\s]{0,3}\d{2})"
+
+CNPJ_ESTADO = r"(42\.?498\.?675/0001-?52)"
