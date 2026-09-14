@@ -1,8 +1,7 @@
-"""Núcleo: exceções, dataclasses de domínio, setup de ambiente e persistência."""
+"""Núcleo: exceções, setup de ambiente e persistência."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import undetected_chromedriver as uc
 from contextlib import closing
 from jupiter import configurar_log
@@ -67,101 +66,16 @@ class ErroDownload(ErroProcesso):
     pass
 
 
-class ErroValidacao(ErroProcesso):
-    """Dados extraídos não passaram na validação de negócio."""
+class ErroDadosNaoLocalizadosBB(ErroDownload):
+    """BB respondeu 'Dados não localizados' mesmo após os retries de data e
+    CNPJ (ver ``baixar_comprovante_bb``) — indica CNPJ e/ou data realmente
+    incorretos no ofício/alvará, não instabilidade do site."""
     pass
 
 
-# ---------------------------------------------------------------------------
-# Dataclasses de domínio
-# ---------------------------------------------------------------------------
-@dataclass
-class DadosComprovante:
-    """Dados extraídos de um Comprovante de Resgate ou Agendamento BB."""
-    conta: str | None = None
-    processo_judicial: str | None = None
-    data_pagamento: str | None = None
-    ano: int | None = None
-    valor_pesquisa: float | None = None
-    conta_judicial: str | None = None
-    caminho_comprovante: str | None = None
-    cnpj: str | None = None
-    data_alvara: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "conta": self.conta,
-            "processo_judicial": self.processo_judicial,
-            "data_pagamento": self.data_pagamento,
-            "ano": self.ano,
-            "valor_pesquisa": self.valor_pesquisa,
-            "conta_judicial": self.conta_judicial,
-            "caminho_comprovante": self.caminho_comprovante,
-            "cnpj": self.cnpj,
-            "data_alvara": self.data_alvara,
-        }
-
-
-@dataclass
-class DadosOficio:
-    """Dados extraídos de Ofícios, Alvarás ou Mandados (para consulta BB)."""
-    data_alvara: str | None = None
-    conta_judicial: str | None = None
-    cnpj: str | None = None
-
-
-@dataclass
-class EstadoDocumentos:
-    """Estado da árvore de documentos de um processo no SEI."""
-    lista_nomes: list[str] = field(default_factory=list)
-    tem_gr: bool = False
-    tem_comprovante: bool = False
-    tem_despacho_apos_gr: bool = False
-
-
-@dataclass
-class PayloadColeta:
-    """Retorno da Etapa 1 com todos os campos necessários."""
-    processo: str
-    status: str
-    conta: str | None = None
-    conta_judicial: str | None = None
-    processo_judicial: str | None = None
-    data_pagamento: str | None = None
-    ano: int | None = None
-    valor_pesquisa: float | None = None
-    cnpj: str | None = None
-    data_alvara: str | None = None
-    caminho_comprovante: str | None = None
-    caminho_comprovante_djo: str | None = None
-    caminho_gr: str | None = None
-    num_doc: str | None = None
-    tem_gr: int = 0
-    tem_comprovante: int = 0
-    tem_comprovante_djo: int = 0
-    tem_despacho_apos_gr: int = 0
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "processo": self.processo,
-            "status": self.status,
-            "conta": self.conta,
-            "conta_judicial": self.conta_judicial,
-            "processo_judicial": self.processo_judicial,
-            "data_pagamento": self.data_pagamento,
-            "ano": self.ano,
-            "valor_pesquisa": self.valor_pesquisa,
-            "cnpj": self.cnpj,
-            "data_alvara": self.data_alvara,
-            "caminho_comprovante": self.caminho_comprovante,
-            "caminho_comprovante_djo": self.caminho_comprovante_djo,
-            "caminho_gr": self.caminho_gr,
-            "num_doc": self.num_doc,
-            "tem_gr": self.tem_gr,
-            "tem_comprovante": self.tem_comprovante,
-            "tem_comprovante_djo": self.tem_comprovante_djo,
-            "tem_despacho_apos_gr": self.tem_despacho_apos_gr,
-        }
+class ErroValidacao(ErroProcesso):
+    """Dados extraídos não passaram na validação de negócio."""
+    pass
 
 
 # ---------------------------------------------------------------------------
