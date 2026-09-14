@@ -64,6 +64,7 @@ class SeiApp(BaseApp):
         self.siafe = Siafe()             # controla o navegador/sessão do siafe (login da etapa 1)
         self.stop_event = False          # vira True quando o usuário cancela a rotina
         self.retorno_automatico = True   # se True, volta sozinho pra tela anterior ao terminar
+        self.operacao_em_andamento = False  # True enquanto a thread do subprocesso (CC ou DJ) roda
 
         self.sei_usuario = ""            # credenciais do sei, capturadas no login inicial
         self.sei_senha = ""
@@ -328,7 +329,14 @@ class SeiApp(BaseApp):
 
     def iniciar_operacao_thread(self, etapa):
 
+        # bloqueia inicio de uma segunda operacao (CC ou DJ) enquanto a
+        # anterior ainda esta rodando/sendo cancelada em background
+        if self.operacao_em_andamento:
+            logger.warning("Operação já em andamento; nova solicitação ignorada.")
+            return
+
         # prepara a tela de execução e roda a etapa escolhida numa thread
+        self.operacao_em_andamento = True
         self.show_execution_frame(on_cancel=lambda: self.cancelar_e_voltar(self.show_cc_execution_frame))
         self.stop_event = False
         self.retorno_automatico = True
@@ -336,6 +344,7 @@ class SeiApp(BaseApp):
 
     def execucao_cc_thread(self, etapa):
         process = None
+        processos_despacho_parcial = []
         try:
             script_path = str(self.ProcessarCCPath)
 
@@ -384,6 +393,7 @@ class SeiApp(BaseApp):
                 # linhas com esse prefixo carregam o andamento pra barra de progresso
                 PREFIXO_BARRA = "__PROGRESSO__:"
                 PREFIXO_DETALHE_ERRO = "__ERRO_DETALHE__:"
+                PREFIXO_DESPACHO_PARCIAL = "__DESPACHO_PARCIAL__:"
                 if linha_limpa.startswith(PREFIXO_BARRA):
                     try:
                         atual, total = map(int, linha_limpa[len(PREFIXO_BARRA):].split(":"))
@@ -398,6 +408,10 @@ class SeiApp(BaseApp):
                             self.erros_acumulados[-1]["traceback"] = detalhe
                     except Exception:
                         pass
+                elif linha_limpa.startswith(PREFIXO_DESPACHO_PARCIAL):
+                    processo_parcial = linha_limpa[len(PREFIXO_DESPACHO_PARCIAL):].strip()
+                    if processo_parcial:
+                        processos_despacho_parcial.append(processo_parcial)
                 # linhas de log: tira o prefixo do nível e mostra na interface
                 elif linha_limpa.startswith(("INFO:", "WARNING:", "ERROR:")):
                     tag = linha_limpa.split(":", 1)[0] + ":"
@@ -438,6 +452,19 @@ class SeiApp(BaseApp):
                 else:
                     self.finalize_progress("Finalizado com Erros", "Erro", f"O processo foi finalizado com código {ret_code}.", "error")
 
+                if processos_despacho_parcial:
+                    lista = "\n".join(f"- {p}" for p in processos_despacho_parcial)
+                    mensagem_parcial = (
+                        "O(s) processo(s) a seguir tiveram o despacho de Crédito "
+                        "em Conta preenchido parcialmente, por faltarem dados no "
+                        f"sistema:\n\n{lista}\n\n"
+                        "Complete as informações faltantes manualmente antes de assinar."
+                    )
+                    self.after(
+                        200,
+                        lambda: self.messagebox_warning("Despacho(s) Incompleto(s)", mensagem_parcial),
+                    )
+
         except (NoSuchElementException, SessionNotCreatedException, InvalidSessionIdException):
             if not self.stop_event:
                 logger.error(f"Erro de Navegador", exc_info=True)
@@ -447,16 +474,24 @@ class SeiApp(BaseApp):
                 logger.error(f"Erro inesperado", exc_info=True)
 
         finally:
+            self.operacao_em_andamento = False
             # volta pra tela de execução do crédito em conta depois de alguns segundos, se estiver em retorno automático
             if self.retorno_automatico:
-                self.after(500000, self.show_cc_execution_frame)
+                self.after(15000, self.show_cc_execution_frame)
 
 
 ### BACKEND: EXECUÇÃO DO DEPÓSITO JUDICIAL
 
     def iniciar_operacao_thread_dj(self, etapa):
 
+        # bloqueia inicio de uma segunda operacao (CC ou DJ) enquanto a
+        # anterior ainda esta rodando/sendo cancelada em background
+        if self.operacao_em_andamento:
+            logger.warning("Operação já em andamento; nova solicitação ignorada.")
+            return
+
         # prepara a tela de execução e roda a etapa escolhida numa thread
+        self.operacao_em_andamento = True
         self.show_execution_frame(on_cancel=lambda: self.cancelar_e_voltar(self.show_dj_execution_frame))
         self.stop_event = False
         self.retorno_automatico = True
@@ -464,6 +499,7 @@ class SeiApp(BaseApp):
 
     def execucao_dj_thread(self, etapa):
         process = None
+        processos_despacho_parcial = []
         try:
             script_path = str(self.ProcessarDJPath)
 
@@ -512,6 +548,7 @@ class SeiApp(BaseApp):
                 # linhas com esse prefixo carregam o andamento pra barra de progresso
                 PREFIXO_BARRA = "__PROGRESSO__:"
                 PREFIXO_DETALHE_ERRO = "__ERRO_DETALHE__:"
+                PREFIXO_DESPACHO_PARCIAL = "__DESPACHO_PARCIAL__:"
                 if linha_limpa.startswith(PREFIXO_BARRA):
                     try:
                         atual, total = map(int, linha_limpa[len(PREFIXO_BARRA):].split(":"))
@@ -526,6 +563,10 @@ class SeiApp(BaseApp):
                             self.erros_acumulados[-1]["traceback"] = detalhe
                     except Exception:
                         pass
+                elif linha_limpa.startswith(PREFIXO_DESPACHO_PARCIAL):
+                    processo_parcial = linha_limpa[len(PREFIXO_DESPACHO_PARCIAL):].strip()
+                    if processo_parcial:
+                        processos_despacho_parcial.append(processo_parcial)
                 # linhas de log: tira o prefixo do nível e mostra na interface
                 elif linha_limpa.startswith(("INFO:", "WARNING:", "ERROR:")):
                     tag = linha_limpa.split(":", 1)[0] + ":"
@@ -566,6 +607,19 @@ class SeiApp(BaseApp):
                 else:
                     self.finalize_progress("Finalizado com Erros", "Erro", f"O processo foi finalizado com código {ret_code}.", "error")
 
+                if processos_despacho_parcial:
+                    lista = "\n".join(f"- {p}" for p in processos_despacho_parcial)
+                    mensagem_parcial = (
+                        "O(s) processo(s) a seguir tiveram o despacho de Depósito "
+                        "Judicial preenchido parcialmente, por faltarem dados no "
+                        f"sistema:\n\n{lista}\n\n"
+                        "Complete as informações faltantes manualmente antes de assinar."
+                    )
+                    self.after(
+                        200,
+                        lambda: self.messagebox_warning("Despacho(s) Incompleto(s)", mensagem_parcial),
+                    )
+
         except (NoSuchElementException, SessionNotCreatedException, InvalidSessionIdException):
             if not self.stop_event:
                 logger.error(f"Erro de Navegador", exc_info=True)
@@ -575,9 +629,10 @@ class SeiApp(BaseApp):
                 logger.error(f"Erro inesperado", exc_info=True)
 
         finally:
+            self.operacao_em_andamento = False
             # volta pra tela de execução do depósito judicial depois de alguns segundos, se estiver em retorno automático
             if self.retorno_automatico:
-                self.after(500000, self.show_dj_execution_frame)
+                self.after(15000, self.show_dj_execution_frame)
 
 
 if __name__ == "__main__":
