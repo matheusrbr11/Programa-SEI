@@ -11,6 +11,7 @@ from pathlib import Path
 import logging
 import sqlite3
 import base64
+import re
 
 from jupiter import Siafe, SEI
 from jupiter.seilibrary_xpaths import xpaths_processos
@@ -18,9 +19,13 @@ import automaweb
 
 from .config import (
     URL_BB, URL_SIAFE, CAMINHO_DRIVER_EDGE, CAMINHO_HERMES, PASTA_GR,
-    CONTA_PROCESSAR, NOME_PDF_PGE,
+    CONTA_PROCESSAR, NOME_PDF_PGE, CAMPOS_OBRIGATORIOS_DESPACHO,
+    CNPJ_PRINCIPAL, CNPJ_ALTERNATIVO,
 )
-from .core import ErroSEI, ErroSIAFE, ErroBB, ErroLoginSiafe, ErroExtracao, ErroValidacao, ErroDownload
+from .core import (
+    ErroSEI, ErroSIAFE, ErroBB, ErroLoginSiafe, ErroExtracao, ErroValidacao,
+    ErroDownload, ErroDadosNaoLocalizadosBB,
+)
 from .utils import (
     buscar_regex,
     extrair_texto_pdf,
@@ -103,6 +108,18 @@ def _buscar_data_pagamento_por_conta(conta_judicial: str) -> str | None:
     return data_pagamento
 
 
+def _cnpj_alternativo_bb(cnpj: str) -> str | None:
+    """Retorna o outro CNPJ do Estado usado na consulta BB (ver
+    ``CNPJ_PRINCIPAL``/``CNPJ_ALTERNATIVO``), ou None se o CNPJ informado
+    não for nenhum dos dois conhecidos (não há alternativa a tentar)."""
+    cnpj_normalizado = re.sub(r"\D", "", cnpj or "")
+    if cnpj_normalizado == re.sub(r"\D", "", CNPJ_PRINCIPAL):
+        return CNPJ_ALTERNATIVO
+    if cnpj_normalizado == re.sub(r"\D", "", CNPJ_ALTERNATIVO):
+        return CNPJ_PRINCIPAL
+    return None
+
+
 def _tentar_resgate_bb(nav, conta_judicial: str, cnpj: str, data_alvara: str) -> str | None:
     """Uma tentativa de consulta de resgate no BB. Retorna mensagem de erro, se houver."""
     data_inicio = datetime.strptime(data_alvara, "%d/%m/%Y")
@@ -151,17 +168,29 @@ def baixar_comprovante_bb(dados_oficio: dict) -> Path:
             log.warning(f"BB não retornou resgate para conta {conta_judicial}: {erro}")
 
             data_fallback = _buscar_data_pagamento_por_conta(conta_judicial)
-            if not data_fallback or data_fallback == data_alvara:
-                raise ErroDownload(f"BB não retornou resgate para conta {conta_judicial}: {erro}")
+            data_fallback = data_fallback if data_fallback != data_alvara else None
+            cnpj_fallback = _cnpj_alternativo_bb(cnpj)
 
-            log.info(
-                f"Tentando novamente para conta {conta_judicial} com a data {data_fallback}."
-            )
-            nav.abrir_url(URL_BB)
-            erro = _tentar_resgate_bb(nav, conta_judicial, cnpj, data_fallback)
+            tentativas = [
+                (cnpj_fallback, data_alvara),
+                (cnpj, data_fallback),
+                (cnpj_fallback, data_fallback),
+            ]
+            for cnpj_tentativa, data_tentativa in tentativas:
+                if not erro:
+                    break
+                if not cnpj_tentativa or not data_tentativa:
+                    continue
+                log.info(
+                    f"Tentando novamente para conta {conta_judicial} com "
+                    f"CNPJ {cnpj_tentativa} e data {data_tentativa}."
+                )
+                nav.abrir_url(URL_BB)
+                erro = _tentar_resgate_bb(nav, conta_judicial, cnpj_tentativa, data_tentativa)
+
             if erro:
-                raise ErroDownload(
-                    f"BB não retornou resgate para conta {conta_judicial} mesmo com a data {data_fallback}"
+                raise ErroDadosNaoLocalizadosBB(
+                    f"BB não localizou dados para a conta {conta_judicial}: {erro}"
                 )
 
         nav.clicar('//*[@id="tblResgate"]/tbody/tr/td[1]/input')
@@ -406,32 +435,47 @@ def extrair_dados_comprovante_do_processo(sei: SEI, nome_comprovante: str) -> di
     return ExtratorComprovante.extrair(texto_pdf)
 
 
-def formatar_despacho_inserido(sei: SEI, registro: dict, titulo: str, index_doc: str) -> None:
-    """Formata o despacho no SEI com valor por extenso."""
-    try:
-        valor_float = float(registro["valor"])
-    except (ValueError, TypeError) as e:
-        raise ErroValidacao("Valor inválido para formatação do despacho.") from e
-
-    valor_formatado = formatar_moeda(valor_float)
+def _valor_por_extenso(valor_float: float) -> str:
     try:
         valor_por_extenso = num2words(valor_float, lang="pt_BR", to="currency")
-        valor_por_extenso = valor_por_extenso.replace("catorze", "quatorze")
+        return valor_por_extenso.replace("catorze", "quatorze")
     except Exception:
-        valor_por_extenso = "valor por extenso não calculado"
+        return "valor por extenso não calculado"
 
-    num_documento = registro.get("num_documento", "—")
+
+def validar_valor_despacho_cc(registro: dict) -> float:
+    """Valida e converte 'valor' do registro para float.
+
+    Deve ser chamada antes de ``sei.incluir_despacho`` para evitar criar o
+    documento no SEI quando o valor é inválido/ausente."""
+    try:
+        return float(registro["valor"])
+    except (ValueError, TypeError, KeyError) as e:
+        raise ErroValidacao("Valor inválido para formatação do despacho.") from e
+
+
+def formatar_despacho_inserido(
+    sei: SEI, registro: dict, titulo: str, index_doc: str, valor_float: float,
+) -> bool:
+    """Formata o despacho no SEI com valor por extenso.
+
+    Retorna False quando algum campo obrigatório do despacho não estava
+    disponível no banco de dados, indicando que o despacho foi incluído
+    apenas parcialmente e precisa de complementação manual."""
+    despacho_completo = all(registro.get(campo) for campo in CAMPOS_OBRIGATORIOS_DESPACHO)
+
     mapa_texto = {
         "@tratamento_destinatario@ @cargo_destinatario@,": titulo,
-        "[valor]": valor_formatado,
-        "[valor_ext]": valor_por_extenso,
-        "[data]": registro.get("data", ""),
-        "[num_documento]": num_documento,
-        "[index_documento_gr]": index_doc,
+        "[valor]": formatar_moeda(valor_float),
+        "[valor_ext]": _valor_por_extenso(valor_float),
+        "[data]": registro.get("data") or "—",
+        "[num_documento]": registro.get("num_documento") or "—",
+        "[index_documento_gr]": index_doc or "—",
     }
-    mapa_links = {index_doc: index_doc}
+    mapa_links = {index_doc: index_doc} if index_doc else {}
 
     sei.formatar_despacho(mapa_texto, mapa_links)
+    return despacho_completo
 
 
 def mapear_estado_documentos(sei: SEI, processo: str) -> dict:
@@ -450,7 +494,9 @@ def mapear_estado_documentos(sei: SEI, processo: str) -> dict:
             sei.sair_iframe()
             sei.entrar_iframe(xpaths_processos.iframe_conteudo_visualizacao)
             acessivel = sei.verifica_existe(xpaths_processos.incluir_documento, timeout=3)
-        except Exception:
+        except Exception as e:
+            if navegador_perdido(e):
+                raise
             acessivel = False
 
         if not acessivel:
@@ -483,4 +529,4 @@ def mapear_estado_documentos(sei: SEI, processo: str) -> dict:
             "acessivel": True,
         }
     except Exception as e:
-        raise ErroSEI(f"Erro ao mapear documentos da árvore: {e}")
+        raise ErroSEI(f"Erro ao mapear documentos da árvore: {e}") from e
