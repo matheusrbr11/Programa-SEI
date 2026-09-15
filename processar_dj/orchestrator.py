@@ -634,9 +634,20 @@ def etapa1_coletar(
         if not sei.logar_sei(sei_user, sei_pass, orgao_sei):
             raise ErroLoginSEI("Falha no login SEI.")
 
-        log.info("[ETAPA 1] Coletando processos no marcador")
-        processos = sei.visualizar_processos_por_marcador(marcador_filtro)
-        lista_processos = sei.filtrar_processos_por_marcador(processos, marcador_filtro)
+        processos_debug = buscar_processo_por_status("debug")
+        em_modo_debug = bool(processos_debug)
+
+        if em_modo_debug:
+            lista_processos = [reg["processo"] for reg in processos_debug]
+            log.info(
+                f"[ETAPA 1] Modo DEBUG ativo: processando apenas "
+                f"{len(lista_processos)} processo(s) marcado(s) como 'debug', "
+                f"ignorando o marcador de filtro."
+            )
+        else:
+            log.info("[ETAPA 1] Coletando processos no marcador")
+            processos = sei.visualizar_processos_por_marcador(marcador_filtro)
+            lista_processos = sei.filtrar_processos_por_marcador(processos, marcador_filtro)
 
         if not lista_processos:
             log.warning(f"Nenhum processo encontrado com o marcador '{marcador_filtro}'")
@@ -647,18 +658,19 @@ def etapa1_coletar(
         log.info(f"{total} processo(s) mapeado(s) para coleta")
 
         for i, processo in enumerate(lista_processos, start=1):
-            existente = buscar_processo_por_numero(processo)
-            status_existente = existente.get("status") if existente else None
-            if status_existente in ("dados_coletados", "concluido"):
-                log.info(f"[{i}/{total}] {processo} ja possui dados coletados/concluido. Pulando.")
-                estatisticas["ja_prontos"] += 1
-                print(f"__PROGRESSO__:{i}:{total}", flush=True)
-                continue
-            if status_existente == "aguardando_gr":
-                log.info(f"[{i}/{total}] {processo} ja aguardando GR de execucao anterior. Pulando remapeamento.")
-                estatisticas["aguardando_gr"] += 1
-                print(f"__PROGRESSO__:{i}:{total}", flush=True)
-                continue
+            if not em_modo_debug:
+                existente = buscar_processo_por_numero(processo)
+                status_existente = existente.get("status") if existente else None
+                if status_existente in ("dados_coletados", "concluido"):
+                    log.info(f"[{i}/{total}] {processo} ja possui dados coletados/concluido. Pulando.")
+                    estatisticas["ja_prontos"] += 1
+                    print(f"__PROGRESSO__:{i}:{total}", flush=True)
+                    continue
+                if status_existente == "aguardando_gr":
+                    log.info(f"[{i}/{total}] {processo} ja aguardando GR de execucao anterior. Pulando remapeamento.")
+                    estatisticas["aguardando_gr"] += 1
+                    print(f"__PROGRESSO__:{i}:{total}", flush=True)
+                    continue
 
             navegador_com_perda = False
             try:
@@ -668,6 +680,11 @@ def etapa1_coletar(
                 navegador_com_perda = _logar_erro_lote(processo, i, total, e, "coleta", sei=sei)
                 _registrar_erro_coleta(processo, e, estatisticas)
             finally:
+                if em_modo_debug:
+                    resultado_real = buscar_processo_por_numero(processo)
+                    status_real = resultado_real.get("status") if resultado_real else "?"
+                    log.info(f"[DEBUG] {processo}: resultado real da coleta = '{status_real}' (status no banco mantido como 'debug').")
+                    upsert_processo(processo=processo, status="debug")
                 print(f"__PROGRESSO__:{i}:{total}", flush=True)
 
             if navegador_com_perda:
@@ -721,7 +738,19 @@ def etapa2_finalizar(
         if not sei.logar_sei(sei_user, sei_pass, orgao_sei):
             raise ErroLoginSEI("Falha no login SEI.")
 
-        pendentes = buscar_processo_por_status("dados_coletados")
+        processos_debug = buscar_processo_por_status("debug")
+        em_modo_debug = bool(processos_debug)
+
+        if em_modo_debug:
+            pendentes = processos_debug
+            log.info(
+                f"[ETAPA 2] Modo DEBUG ativo: processando apenas "
+                f"{len(pendentes)} processo(s) marcado(s) como 'debug', "
+                f"ignorando status 'dados_coletados' e o marcador de filtro."
+            )
+        else:
+            pendentes = buscar_processo_por_status("dados_coletados")
+
         total = len(pendentes)
         estatisticas["total"] = total
 
@@ -729,11 +758,13 @@ def etapa2_finalizar(
             log.info("[ETAPA 2] Nenhum processo pendente de finalizacao.")
             return {"sucesso": True, "motivo": "vazio", "estatisticas": estatisticas}
 
-        log.info("[ETAPA 2] Verificando marcador de filtro dos processos pendentes")
-        processos_marcador = sei.visualizar_processos_por_marcador(marcador_filtro)
-        processos_no_marcador = set(
-            sei.filtrar_processos_por_marcador(processos_marcador, marcador_filtro)
-        )
+        processos_no_marcador = None
+        if not em_modo_debug:
+            log.info("[ETAPA 2] Verificando marcador de filtro dos processos pendentes")
+            processos_marcador = sei.visualizar_processos_por_marcador(marcador_filtro)
+            processos_no_marcador = set(
+                sei.filtrar_processos_por_marcador(processos_marcador, marcador_filtro)
+            )
 
         log.info(f"[ETAPA 2] {total} processo(s) pendente(s) de finalizacao")
 
@@ -763,6 +794,11 @@ def etapa2_finalizar(
                 estatisticas["erros_detalhe"].append({"processo": processo, "erro": str(e)})
                 navegador_com_perda = _logar_erro_lote(processo, i, total, e, "finalizacao", sei=sei)
             finally:
+                if em_modo_debug:
+                    resultado_real = buscar_processo_por_numero(processo)
+                    status_real = resultado_real.get("status") if resultado_real else "?"
+                    log.info(f"[DEBUG] {processo}: resultado real da finalizacao = '{status_real}' (status no banco mantido como 'debug').")
+                    upsert_processo(processo=processo, status="debug")
                 print(f"__PROGRESSO__:{i}:{total}", flush=True)
 
             if navegador_com_perda:
