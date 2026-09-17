@@ -58,6 +58,7 @@ CAMPOS_OBRIGATORIOS_DESPACHO = (
     "titulo_documento", "numero_documento", "processo_judicial", "reu",
     "data_pagamento", "conta_judicial", "valor_resgate", "valor_30", "num_doc",
 )
+CAMPOS_COMPLEMENTAVEIS = ("reu", "titulo_documento", "numero_documento", "processo_judicial")
 
 # ---------------------------------------------------------------------------
 # SEI

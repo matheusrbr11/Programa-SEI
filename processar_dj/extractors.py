@@ -303,7 +303,7 @@ class ExtratorAlvaraLevantamento(ExtratorBase):
     @classmethod
     def extrair(cls, texto: str) -> list[dict]:
         resultados = []
-        for trecho in cls._split_blocos(texto):
+        for titulo_encontrado, trecho in zip(cls._titulos_split(texto), cls._split_blocos(texto)):
             data_raw = buscar_regex(
                 trecho, r"Data\s+do\s+Dep[óo]sito[\s.]*:\s*(\d{2}/\d{2}/\d{4})"
             )
@@ -332,12 +332,28 @@ class ExtratorAlvaraLevantamento(ExtratorBase):
             if not cnpj:
                 cnpj = normalizar_cnpj(buscar_regex(trecho, CNPJ_ESTADO))
 
+            numero_documento = buscar_regex(trecho, r"^\s*(\d+)")
+
+            processo_judicial = normalizar_processo_judicial(
+                buscar_regex(texto, r"EXECU[ÇC][ÃA]O\s+FISCAL\s+N[º°o]?\s*" + PADRAO_CNJ)
+            )
+
+            reu = buscar_regex(texto, r"EXECUTADO\s*:\s*([^\n]+)")
+            if reu:
+                reu = reu.strip()
+
+            titulo_documento = re.sub(r"\s+N[º°o]?\s*$", "", titulo_encontrado).strip()
+
             if data_alvara and cnpj and contas_unicas:
                 for conta in contas_unicas:
                     resultados.append({
                         "data_alvara": data_alvara,
                         "conta_judicial": conta.strip(),
                         "cnpj": cnpj,
+                        "titulo_documento": titulo_documento,
+                        "numero_documento": numero_documento,
+                        "processo_judicial": processo_judicial,
+                        "reu": reu,
                     })
         return resultados
 
@@ -369,12 +385,26 @@ class ExtratorMandado(ExtratorBase):
                 buscar_regex(trecho, r"(?:CPF/)?CNPJ[\s.]*:\s*" + PADRAO_CNPJ)
             )
 
+            numero_documento = buscar_regex(texto, r"Mandado\s*:\s*(\d+)")
+
+            processo_judicial = normalizar_processo_judicial(
+                buscar_regex(texto, r"Processo\s*:\s*" + PADRAO_CNJ)
+            )
+
+            reu = buscar_regex(texto, r"R[ée]u\s*:\s*([^\n]+)")
+            if reu:
+                reu = reu.strip()
+
             if data_alvara and contas_unicas and cnpj:
                 for conta in contas_unicas:
                     resultados.append({
                         "data_alvara": data_alvara,
                         "conta_judicial": conta,
                         "cnpj": cnpj,
+                        "titulo_documento": "Mandado de Pagamento",
+                        "numero_documento": numero_documento,
+                        "processo_judicial": processo_judicial,
+                        "reu": reu,
                     })
         return resultados
 

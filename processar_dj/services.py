@@ -22,7 +22,7 @@ from .config import (
     CONTA_PROCESSAR, NOME_PDF_PGE, NOME_TITULO_GR, NOME_TITULO_COMPROVANTE_BB,
     NOME_TITULO_COMPROVANTE_DJO, CAMINHO_COOKIES_SHAREPOINT, NOMES_MESES,
     PASTA_BASE_SHAREPOINT, PREFIXO_ARQUIVO_DIARIO, SITE_SHAREPOINT, CAMPOS_OBRIGATORIOS_DESPACHO,
-    CNPJ_PRINCIPAL, CNPJ_ALTERNATIVO,
+    CAMPOS_COMPLEMENTAVEIS, CNPJ_PRINCIPAL, CNPJ_ALTERNATIVO,
 )
 from .core import (
     ErroSEI, ErroSIAFE, ErroBB, ErroLoginSiafe, ErroExtracao, ErroValidacao,
@@ -263,7 +263,10 @@ def consultar_conta_judicial(lista_dados: list[dict]) -> dict | None:
         dados["data_alvara"] = dados_oficio.get("data_alvara")
         dados["reu"] = dados_oficio.get("reu")
         dados["titulo_documento"] = dados_oficio.get("titulo_documento")
-        dados["numero_documento"] = dados_oficio.get("numero_documento")
+        dados["numero_documento"] = dados_oficio.get("numero_documento") or dados.get("numero_documento")
+
+        if not dados["titulo_documento"] and dados["numero_documento"] and dados["numero_documento"].upper().endswith("OF"):
+            dados["titulo_documento"] = "Ofício"
 
         if dados.get("conta") == CONTA_PROCESSAR:
             return dados
@@ -410,13 +413,28 @@ def baixar_e_extrair_texto(sei: SEI, nome_doc: str) -> str:
         raise ErroSEI(f"[{nome_doc}] Erro inesperado: {mensagem_curta(e)}") from e
 
 
+def _extrair_reu_avulso(texto: str) -> str | None:
+    """Fallback pra pegar o réu de documentos que não batem nenhum extrator
+    (ex.: CDA da PGE), que trazem só 'Nome: ... CPF/CNPJ: ...'."""
+    reu = buscar_regex(texto, r"Nome\s*:\s*([^\n]+?)\s+CPF/CNPJ\s*:")
+    return reu.strip() if reu else None
+
+
 def encontrar_dados_em_anexos(sei: SEI, candidatos: list[str]) -> dict | None:
-    """Itera pelos candidatos até encontrar dados do comprovante."""
+    """Itera pelos candidatos até encontrar dados do comprovante.
+
+    Depois de encontrar o documento com a conta de processamento, continua
+    percorrendo os demais anexos para complementar campos que porventura
+    não estejam nesse documento (ex.: réu/título/número quando essas
+    informações estão espalhadas em anexos diferentes do processo, como uma
+    CDA separada do Ofício/Alvará)."""
     from .extractors import extrair_dados_documento
 
     prioritarios = [n for n in candidatos if NOME_PDF_PGE in n]
     restantes = [n for n in candidatos if NOME_PDF_PGE not in n]
     dado_alternativo = None
+    dado_principal = None
+    reu_avulso_encontrado = None
 
     for nome_doc in prioritarios + restantes:
         log.info(f"Buscando dados em: '{nome_doc}'...")
@@ -430,16 +448,38 @@ def encontrar_dados_em_anexos(sei: SEI, candidatos: list[str]) -> dict | None:
 
         dados = extrair_dados_documento(texto_pdf)
         if not dados:
-            log.warning(f"  [{nome_doc}] Nenhum dado reconhecido.")
+            reu_avulso = _extrair_reu_avulso(texto_pdf)
+            if reu_avulso:
+                if dado_principal is not None and not dado_principal.get("reu"):
+                    dado_principal["reu"] = reu_avulso
+                elif dado_principal is None and not reu_avulso_encontrado:
+                    reu_avulso_encontrado = reu_avulso
+            else:
+                log.warning(f"  [{nome_doc}] Nenhum dado reconhecido.")
             continue
 
-        if dados.get("conta") == CONTA_PROCESSAR:
+        if dado_principal is None and dados.get("conta") == CONTA_PROCESSAR:
             log.info(f"  [{nome_doc}] Dados encontrados.")
-            return dados
+            dado_principal = dados
+            if not dado_principal.get("reu") and reu_avulso_encontrado:
+                dado_principal["reu"] = reu_avulso_encontrado
+            continue
+
+        if dado_principal is not None:
+            faltantes = [c for c in CAMPOS_COMPLEMENTAVEIS if not dado_principal.get(c)]
+            if not faltantes:
+                break
+            for campo in faltantes:
+                if dados.get(campo):
+                    dado_principal[campo] = dados[campo]
+            continue
 
         dado_alternativo = dados
 
-    return dado_alternativo
+    if dado_principal is not None and not dado_principal.get("reu") and reu_avulso_encontrado:
+        dado_principal["reu"] = reu_avulso_encontrado
+
+    return dado_principal or dado_alternativo
 
 
 def extrair_dados_comprovante_do_processo(sei: SEI, nome_comprovante: str) -> dict | None:
@@ -511,11 +551,15 @@ def formatar_despacho_dj_inserido(
         "[num_doc]": registro.get("num_doc") or "—",
         "[index_gr]": index_gr or "—",
     }
-    mapa_links = {
-        v: v for v in (index_despacho, index_comprovante, index_comprovante_djo, index_gr) if v
-    }
+    # lista (não dict) porque [index_comprovante] aparece 2x no texto padrão do
+    # despacho — cada entrada vira uma ocorrência distinta a ser transformada em link
+    mapa_links = [
+        (v, v) for v in (
+            index_despacho, index_comprovante, index_comprovante, index_comprovante_djo, index_gr,
+        ) if v
+    ]
 
-    sei.formatar_despacho(mapa_texto, mapa_links)
+    sei.formatar_despacho_DJ(mapa_texto, mapa_links)
     return despacho_completo
 
 
