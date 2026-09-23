@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from copy import copy
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
+from copy import copy
 import logging
 
 import openpyxl
@@ -71,9 +71,14 @@ def gerar_planilha_resgate(
     caminho_saida: Path,
     data_pagamento: str | None = None,
 ) -> float:
-    """Preenche o template de Resgate com as linhas da planilha diária,
-    pinta de amarelo as linhas cuja CONTA JUDICIAL está em ``contas_resgatadas``
-    e preenche a data do cabeçalho com ``data_pagamento``, se informada.
+    """Preenche o template de Resgate com as linhas da planilha diária e
+    pinta de amarelo somente as linhas cuja CONTA JUDICIAL seja exatamente
+    igual a uma das contas em ``contas_resgatadas`` (um comprovante pode
+    reunir o resgate de mais de uma conta judicial). Preenche a data do
+    cabeçalho com ``data_pagamento``, se informada.
+
+    Levanta ``ValueError`` se nenhuma conta de ``contas_resgatadas`` for
+    encontrada na planilha diária.
 
     Retorna o valor total de LC 151 '30%'.
     """
@@ -110,7 +115,10 @@ def gerar_planilha_resgate(
     linha_totais = ultima_linha_dados + 1
     ws_modelo.merge_cells(f"A{linha_totais}:B{linha_totais}")
 
-    contas_alvo = {c.strip() for c in contas_resgatadas}
+    contas_alvo = {str(c).strip() for c in contas_resgatadas if c is not None and str(c).strip()}
+    if not contas_alvo:
+        raise ValueError("Nenhuma conta judicial informada para localizar na planilha diária.")
+    contas_encontradas: set[str] = set()
 
     for offset, linha_diaria in enumerate(linhas_diarias):
         linha_destino = PRIMEIRA_LINHA_DADOS + offset
@@ -122,10 +130,18 @@ def gerar_planilha_resgate(
 
         ws_modelo[f"{COLUNA_LC151}{linha_destino}"] = f"=I{linha_destino}*0.3"
 
-        conta_judicial = ws_modelo[f"{COLUNA_CONTA_JUDICIAL_MODELO}{linha_destino}"].value
-        if conta_judicial is not None and str(conta_judicial).strip() in contas_alvo:
+        conta_judicial_linha = ws_modelo[f"{COLUNA_CONTA_JUDICIAL_MODELO}{linha_destino}"].value
+        conta_judicial_linha = str(conta_judicial_linha).strip() if conta_judicial_linha is not None else None
+        if conta_judicial_linha is not None and conta_judicial_linha in contas_alvo:
+            contas_encontradas.add(conta_judicial_linha)
             for col in list(MAPA_COLUNAS) + [COLUNA_LC151]:
                 ws_modelo[f"{col}{linha_destino}"].fill = PREENCHIMENTO_AMARELO
+
+    if not contas_encontradas:
+        contas_texto = ", ".join(sorted(contas_alvo))
+        raise ValueError(
+            f"Conta(s) judicial(is) '{contas_texto}' não encontrada(s) na planilha diária de resgates ({caminho_diario.name})."
+        )
 
     for col in ("F", "G", "H", "I"):
         ws_modelo[f"{col}{linha_totais}"] = f"=SUM({col}{PRIMEIRA_LINHA_DADOS}:{col}{ultima_linha_dados})"
