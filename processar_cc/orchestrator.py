@@ -423,8 +423,8 @@ def _baixar_gr_pendentes_em_lote(siafe_usuario: str, siafe_senha: str, estatisti
     Resolve todos os processos 'aguardando_gr' abrindo uma sessão do SIAFE
     por grupo (versao_siafe, ano_doc).
 
-    Retorna um dict de falha se o lote deve ser interrompido
-    (falha de login ou navegador perdido), ou None se terminou
+    Retorna um dict de falha se o lote deve ser interrompido 
+    (falha de login ou navegador perdido), ou None se terminou 
     com sucesso ou erros pontuais por processo, que nao interrompem.
     """
     pendentes = buscar_processo_por_status("aguardando_gr")
@@ -447,11 +447,9 @@ def _baixar_gr_pendentes_em_lote(siafe_usuario: str, siafe_senha: str, estatisti
             )
             try:
                 if idx_grupo > 0:
-                    # troca de exercício no mesmo navegador: sem sair antes, o SIAFE
-                    # redireciona de volta pra sessão anterior em vez de logar de novo
                     siafe.clicar(SAIR_SIAFE)
                 abrir_sessao_siafe(siafe, versao_siafe, siafe_usuario, siafe_senha, ano_doc)
-
+                
             except ErroLoginSiafe:
                 log.error("[ETAPA 1] Falha de login no SIAFE, interrompendo lote.")
                 return {"sucesso": False, "motivo": "falha_login_siafe", "estatisticas": estatisticas}
