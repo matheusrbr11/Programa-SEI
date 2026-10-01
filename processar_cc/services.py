@@ -295,12 +295,10 @@ def abrir_sessao_siafe(
     ano_doc: int | str,
 ) -> None:
     """Navega e autentica uma sessão do SIAFE para a combinação (versao_siafe, ano_doc)."""
-    url = URL_SIAFE.get(versao_siafe)
-    if url is None:
+    if versao_siafe not in URL_SIAFE:
         raise ErroSIAFE(f"Versão SIAFE inválida: {versao_siafe}")
 
-    siafe.abrir_url(url)
-
+    # logar_siafe já navega pra URL de login internamente.
     if not siafe.logar_siafe(versao_siafe, siafe_usuario, siafe_senha, ano_doc):
         raise ErroLoginSiafe("Erro no login SIAFE.")
 
