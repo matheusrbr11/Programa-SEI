@@ -201,6 +201,10 @@ Programa SEI/
 │   ├── utils.py               #   Funções utilitárias
 │   └── config.py              #   Constantes de negócio, URLs, caminhos
 │
+├── planilhas/
+│   ├── Resgate Modelo.xlsx                   # Template usado na geração da planilha de Resgate (Comprovante DJO)
+│   └── RESGATES A FAVOR DO GOVER *.xlsx       # Exemplo de planilha diária de resgates do Banco do Brasil
+│
 ├── driver/
 │   └── msedgedriver.exe      # WebDriver do Edge
 │
