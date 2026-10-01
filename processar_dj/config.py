@@ -12,7 +12,7 @@ PASTA_LOG_GERAL = r"\\cifs-zone1\tesouro\Programas da SUPCONC\logs\Programa SEI"
 PASTA_GR = Path(r"//cifs-zone1/tesouro/Programas da SUPCONC/GRs PRJ")
 CAMINHO_HERMES = Path(r"\\cifs-zone1\tesouro\Programas da SUPCONC\Programa Hermes\base de dados\hermes.db")
 CAMINHO_DRIVER_EDGE = str(PROJECT_BASE_PATH / "driver" / "msedgedriver.exe")
-CAMINHO_TEMPLATE_RESGATE = PROJECT_BASE_PATH / "Resgate Modelo.xlsx"
+CAMINHO_TEMPLATE_RESGATE = PROJECT_BASE_PATH / "planilhas" / "Resgate Modelo.xlsx"
 
 # ---------------------------------------------------------------------------
 # URLs
