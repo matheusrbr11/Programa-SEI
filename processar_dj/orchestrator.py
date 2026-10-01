@@ -10,10 +10,11 @@ import time
 from jupiter import SEI, Siafe
 
 from .config import (
-    ORGAO_SEI_PADRAO, MARCADOR_FILTRO, CONTA_PROCESSAR, TIPOS_NAO_PGE,
+    ORGAO_SEI_PADRAO, MARCADOR_FILTRO, CONTAS_PROCESSAR, TIPOS_NAO_PGE,
     NIVEL_ACESSO_SEI, HIPOTESE_LEGAL, DESPACHO_PADRAO, TITULO_DESPACHO,
     BLOCO_ASSINATURA, MARCADOR_CONCLUIDO, CAMINHO_TEMPLATE_RESGATE, PASTA_GR,
     NOME_TITULO_GR, NOME_TITULO_COMPROVANTE_BB, NOME_TITULO_COMPROVANTE_DJO,
+    SAIR_SIAFE,
 )
 from .core import (
     inicializar_tabela_processos, upsert_processo,
@@ -134,7 +135,7 @@ def coletar_dados_processo(sei: SEI, processo: str) -> dict:
     valor_30 = dados.get("valor_30")
 
     # 4. Validar conta de processamento
-    if conta != CONTA_PROCESSAR:
+    if conta not in CONTAS_PROCESSAR:
         return {
             "processo": processo,
             "status": "ignorado",
@@ -530,6 +531,8 @@ def _baixar_gr_pendentes_em_lote(siafe_usuario: str, siafe_senha: str, estatisti
                 f"({len(registros)} GR(s))"
             )
             try:
+                if idx_grupo > 0:
+                    siafe.clicar(SAIR_SIAFE)
                 abrir_sessao_siafe(siafe, versao_siafe, siafe_usuario, siafe_senha, ano_doc)
 
             except ErroLoginSiafe:
