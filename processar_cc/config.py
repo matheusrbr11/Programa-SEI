@@ -1,6 +1,7 @@
 """Constantes, URLs, regex globais e configurações de negócio."""
 
 from pathlib import Path
+import os
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -18,6 +19,7 @@ URL_SIAFE2 = "https://siafe2.fazenda.rj.gov.br/Siafe/faces/login.jsp"
 URL_SIAFE1 = "https://www5.fazenda.rj.gov.br/SiafeRio/faces/login.jsp"
 URL_BB = "https://www63.bb.com.br/portalbb/djo/id/resgate/dadosResgate,802,4647,500828,0,1,1.bbx"
 URL_SIAFE = {1: URL_SIAFE2, 4: URL_SIAFE1}
+SAIR_SIAFE = '//*[@id="pt1:pt_rhcl1:pt_np1:pt_cni2"]'
 
 # ---------------------------------------------------------------------------
 # Contas e CNPJ
@@ -37,7 +39,11 @@ MARCADOR_CONCLUIDO = "PGE - Credito em Conta - Concluido"
 # ---------------------------------------------------------------------------
 NOME_PDF_PGE = "Documento"
 TITULO_DESPACHO = "À SUBAFIN,"
-DESPACHO_PADRAO = "DPJ"
+
+# Modelo de despacho salvo no SEI é individual por usuário; 'bdeza' usa o
+# modelo com sufixo B, qualquer outro usuário usa o modelo com sufixo M.
+_SUFIXO_DESPACHO_USUARIO = "B" if os.getlogin().lower() == "bdeza" else "M"
+DESPACHO_PADRAO = f"DPJ_{_SUFIXO_DESPACHO_USUARIO}"
 BLOCO_ASSINATURA = "1240785 - Assinatura de despachos da COOCCB"
 ORGAO_SEI_PADRAO = "SEFAZ"
 CAMPOS_OBRIGATORIOS_DESPACHO = ("valor", "data", "num_documento")
