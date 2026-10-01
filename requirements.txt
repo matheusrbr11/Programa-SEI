@@ -6,5 +6,5 @@ num2words>=0.5.12
 pandas>=2.0.0
 urllib3>=1.26.0
 TesouroEOP-UI
-jupiter-subtes==1.1.7
+jupiter-subtes==1.1.9
 setuptools>=70.0.0
