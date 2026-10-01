@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 import logging
 import re
 
-from .config import CONTA_PROCESSAR, PADRAO_CNJ, PADRAO_DATA_EXTENSO, PADRAO_CNPJ, CNPJ_ESTADO
+from .config import CONTAS_PROCESSAR, PADRAO_CNJ, PADRAO_DATA_EXTENSO, PADRAO_CNPJ, CNPJ_ESTADO
 from .services import consultar_conta_judicial
 from .utils import (
     buscar_regex,
@@ -74,7 +74,7 @@ class ExtratorResgateBB(ExtratorBase):
             dado = cls._extrair_bloco(bloco)
             if not dado:
                 continue
-            if dado.get("conta") == CONTA_PROCESSAR:
+            if dado.get("conta") in CONTAS_PROCESSAR:
                 return dado
             ultimo_dado = dado
 
@@ -160,11 +160,12 @@ class ExtratorResgateBB(ExtratorBase):
 
     @classmethod
     def _identificar_conta_destino(cls, bloco: str) -> str | None:
-        """Identifica se o bloco se refere à conta de processamento."""
-        digitos_alvo = re.sub(r"\D", "", CONTA_PROCESSAR)
+        """Identifica se o bloco se refere a alguma das contas de processamento."""
         bloco_limpo = re.sub(r"\D", "", bloco)
-        if digitos_alvo and digitos_alvo in bloco_limpo:
-            return CONTA_PROCESSAR
+        for conta in CONTAS_PROCESSAR:
+            digitos_alvo = re.sub(r"\D", "", conta)
+            if digitos_alvo and digitos_alvo in bloco_limpo:
+                return conta
 
         contas = re.findall(
             r"(?:Conta|C/C)[\s\S]{0,20}?(\d{4,}[\.\-\s]*\d{1,2})\b",
