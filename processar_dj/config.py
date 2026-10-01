@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import tempfile
+import os
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -20,11 +21,12 @@ URL_SIAFE2 = "https://siafe2.fazenda.rj.gov.br/Siafe/faces/login.jsp"
 URL_SIAFE1 = "https://www5.fazenda.rj.gov.br/SiafeRio/faces/login.jsp"
 URL_BB = "https://www63.bb.com.br/portalbb/djo/id/resgate/dadosResgate,802,4647,500828,0,1,1.bbx"
 URL_SIAFE = {1: URL_SIAFE2, 4: URL_SIAFE1}
+SAIR_SIAFE = '//*[@id="pt1:pt_rhcl1:pt_np1:pt_cni2"]'
 
 # ---------------------------------------------------------------------------
 # Contas e CNPJ
 # ---------------------------------------------------------------------------
-CONTA_PROCESSAR = "00000291632-0"
+CONTAS_PROCESSAR = ("00000291921-4", "00000291632-0")
 
 CNPJ_PRINCIPAL = "42.498.675/0001-52"
 CNPJ_ALTERNATIVO = "42.498.600/0001-71"
@@ -50,8 +52,12 @@ NOME_PDF_PGE = "Documento"
 NOME_TITULO_GR = "Guia de Recolhimento"
 NOME_TITULO_COMPROVANTE_BB = "Comprovante de Resgate"
 NOME_TITULO_COMPROVANTE_DJO = "Comprovante DJO - Movimento Diário"
-TITULO_DESPACHO = "À SEFAZ/COOCIADA,"
-DESPACHO_PADRAO = "DJT"
+TITULO_DESPACHO = "À SUBAFIN,"
+
+# Modelo de despacho salvo no SEI é individual por usuário; 'bdeza' usa o
+# modelo com sufixo B, qualquer outro usuário usa o modelo com sufixo M.
+_SUFIXO_DESPACHO_USUARIO = "B" if os.getlogin().lower() == "bdeza" else "M"
+DESPACHO_PADRAO = f"DJT_{_SUFIXO_DESPACHO_USUARIO}"
 BLOCO_ASSINATURA = "1240785 - Assinatura de despachos da COOCCB"
 ORGAO_SEI_PADRAO = "SEFAZ"
 CAMPOS_OBRIGATORIOS_DESPACHO = (
