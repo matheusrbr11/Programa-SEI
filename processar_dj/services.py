@@ -19,7 +19,7 @@ import automaweb
 
 from .config import (
     URL_BB, URL_SIAFE, CAMINHO_DRIVER_EDGE, CAMINHO_HERMES, PASTA_GR,
-    CONTA_PROCESSAR, NOME_PDF_PGE, NOME_TITULO_GR, NOME_TITULO_COMPROVANTE_BB,
+    CONTAS_PROCESSAR, NOME_PDF_PGE, NOME_TITULO_GR, NOME_TITULO_COMPROVANTE_BB,
     NOME_TITULO_COMPROVANTE_DJO, CAMINHO_COOKIES_SHAREPOINT, NOMES_MESES,
     PASTA_BASE_SHAREPOINT, PREFIXO_ARQUIVO_DIARIO, SITE_SHAREPOINT, CAMPOS_OBRIGATORIOS_DESPACHO,
     CAMPOS_COMPLEMENTAVEIS, CNPJ_PRINCIPAL, CNPJ_ALTERNATIVO,
@@ -268,7 +268,7 @@ def consultar_conta_judicial(lista_dados: list[dict]) -> dict | None:
         if not dados["titulo_documento"] and dados["numero_documento"] and dados["numero_documento"].upper().endswith("OF"):
             dados["titulo_documento"] = "Ofício"
 
-        if dados.get("conta") == CONTA_PROCESSAR:
+        if dados.get("conta") in CONTAS_PROCESSAR:
             return dados
 
         ultimo_dado_valido = dados
@@ -302,12 +302,10 @@ def abrir_sessao_siafe(
     ano_doc: int | str,
 ) -> None:
     """Navega e autentica uma sessão do SIAFE para a combinação (versao_siafe, ano_doc)."""
-    url = URL_SIAFE.get(versao_siafe)
-    if url is None:
+    if versao_siafe not in URL_SIAFE:
         raise ErroSIAFE(f"Versão SIAFE inválida: {versao_siafe}")
 
-    siafe.abrir_url(url)
-
+    # logar_siafe já navega pra URL de login internamente.
     if not siafe.logar_siafe(versao_siafe, siafe_usuario, siafe_senha, ano_doc):
         raise ErroLoginSiafe("Erro no login SIAFE.")
 
@@ -458,7 +456,7 @@ def encontrar_dados_em_anexos(sei: SEI, candidatos: list[str]) -> dict | None:
                 log.warning(f"  [{nome_doc}] Nenhum dado reconhecido.")
             continue
 
-        if dado_principal is None and dados.get("conta") == CONTA_PROCESSAR:
+        if dado_principal is None and dados.get("conta") in CONTAS_PROCESSAR:
             log.info(f"  [{nome_doc}] Dados encontrados.")
             dado_principal = dados
             if not dado_principal.get("reu") and reu_avulso_encontrado:
