@@ -52,16 +52,35 @@ def _linhas_dados_diario(ws: Worksheet):
         yield row
 
 
-def _copiar_estilo_linha(ws: Worksheet, linha_origem: int, linha_destino: int) -> None:
-    """Copia fonte, borda, preenchimento, formato numérico e alinhamento de uma linha para outra."""
-    for col in range(1, ws.max_column + 1):
-        origem = ws.cell(row=linha_origem, column=col)
+def _capturar_estilo_linha(ws: Worksheet, linha: int) -> list[dict]:
+    """Captura fonte, borda, preenchimento, formato numérico e alinhamento de uma linha.
+
+    Precisa ser chamada uma única vez, antes de qualquer pintura: ``linha``
+    (PRIMEIRA_LINHA_DADOS) também é o destino da primeira linha de dados, e se
+    ela for pintada de amarelo durante o loop, uma cópia ao vivo propagaria
+    esse amarelo pra todas as linhas seguintes.
+    """
+    return [
+        {
+            "font": copy(celula.font),
+            "border": copy(celula.border),
+            "fill": copy(celula.fill),
+            "number_format": celula.number_format,
+            "alignment": copy(celula.alignment),
+        }
+        for celula in (ws.cell(row=linha, column=col) for col in range(1, ws.max_column + 1))
+    ]
+
+
+def _aplicar_estilo_linha(ws: Worksheet, estilo_linha: list[dict], linha_destino: int) -> None:
+    """Aplica numa linha o estilo capturado por ``_capturar_estilo_linha``."""
+    for col, estilo in enumerate(estilo_linha, start=1):
         destino = ws.cell(row=linha_destino, column=col)
-        destino.font = copy(origem.font)
-        destino.border = copy(origem.border)
-        destino.fill = copy(origem.fill)
-        destino.number_format = origem.number_format
-        destino.alignment = copy(origem.alignment)
+        destino.font = copy(estilo["font"])
+        destino.border = copy(estilo["border"])
+        destino.fill = copy(estilo["fill"])
+        destino.number_format = estilo["number_format"]
+        destino.alignment = copy(estilo["alignment"])
 
 
 def gerar_planilha_resgate(
@@ -120,9 +139,11 @@ def gerar_planilha_resgate(
         raise ValueError("Nenhuma conta judicial informada para localizar na planilha diária.")
     contas_encontradas: set[str] = set()
 
+    estilo_linha_dados = _capturar_estilo_linha(ws_modelo, PRIMEIRA_LINHA_DADOS)
+
     for offset, linha_diaria in enumerate(linhas_diarias):
         linha_destino = PRIMEIRA_LINHA_DADOS + offset
-        _copiar_estilo_linha(ws_modelo, PRIMEIRA_LINHA_DADOS, linha_destino)
+        _aplicar_estilo_linha(ws_modelo, estilo_linha_dados, linha_destino)
 
         for col_modelo, col_diario in MAPA_COLUNAS.items():
             valor = ws_diario[f"{col_diario}{linha_diaria[0].row}"].value
