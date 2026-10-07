@@ -22,7 +22,7 @@ from .config import (
     CONTAS_PROCESSAR, NOME_PDF_PGE, NOME_TITULO_GR, NOME_TITULO_COMPROVANTE_BB,
     NOME_TITULO_COMPROVANTE_DJO, CAMINHO_COOKIES_SHAREPOINT, NOMES_MESES,
     PASTA_BASE_SHAREPOINT, PREFIXO_ARQUIVO_DIARIO, SITE_SHAREPOINT, CAMPOS_OBRIGATORIOS_DESPACHO,
-    CAMPOS_COMPLEMENTAVEIS, CNPJ_PRINCIPAL, CNPJ_ALTERNATIVO,
+    CAMPOS_COMPLEMENTAVEIS, CNPJ_PRINCIPAL, CNPJ_ALTERNATIVO, CODIGO_UG_SIAFE,
 )
 from .core import (
     ErroSEI, ErroSIAFE, ErroBB, ErroLoginSiafe, ErroExtracao, ErroValidacao,
@@ -337,7 +337,9 @@ def baixar_gr_no_siafe(siafe: Siafe, registro: dict, *, primeira_consulta: bool 
         num_doc = registro["num_documento"]
 
         def consulta_por_registro(siafe: Siafe) -> str | None:
-            return num_doc if siafe.consultar_GR_numDoc(num_doc, primeira_consulta=primeira_consulta) else None
+            return num_doc if siafe.consultar_GR_numDoc(
+                num_doc, CODIGO_UG_SIAFE, primeira_consulta=primeira_consulta,
+            ) else None
 
         return _consultar_e_baixar_gr(siafe, registro["valor"], consulta_por_registro)
     except Exception as e:
@@ -359,7 +361,7 @@ def baixar_gr_siafe_por_valor(
     """
     try:
         def consulta(siafe: Siafe, *, valor: float, primeira: bool) -> str | None:
-            return siafe.consultar_GR_valor(valor, versao_siafe, primeira_consulta=primeira)
+            return siafe.consultar_GR_valor(valor, versao_siafe, CODIGO_UG_SIAFE, primeira_consulta=primeira)
 
         resultado = _consultar_e_baixar_gr(
             siafe, valor_pesquisa, lambda s: consulta(s, valor=valor_pesquisa, primeira=primeira_consulta),

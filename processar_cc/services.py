@@ -20,7 +20,7 @@ import automaweb
 from .config import (
     URL_BB, URL_SIAFE, CAMINHO_DRIVER_EDGE, CAMINHO_HERMES, PASTA_GR,
     CONTA_PROCESSAR, NOME_PDF_PGE, CAMPOS_OBRIGATORIOS_DESPACHO,
-    CNPJ_PRINCIPAL, CNPJ_ALTERNATIVO,
+    CNPJ_PRINCIPAL, CNPJ_ALTERNATIVO, CODIGO_UG_SIAFE,
 )
 from .core import (
     ErroSEI, ErroSIAFE, ErroBB, ErroLoginSiafe, ErroExtracao, ErroValidacao,
@@ -330,7 +330,9 @@ def baixar_gr_no_siafe(siafe: Siafe, registro: dict, *, primeira_consulta: bool 
         num_doc = registro["num_documento"]
 
         def consulta_por_registro(siafe: Siafe) -> str | None:
-            return num_doc if siafe.consultar_GR_numDoc(num_doc, primeira_consulta=primeira_consulta) else None
+            return num_doc if siafe.consultar_GR_numDoc(
+                num_doc, CODIGO_UG_SIAFE, primeira_consulta=primeira_consulta,
+            ) else None
 
         return _consultar_e_baixar_gr(siafe, registro["valor"], consulta_por_registro)
     except Exception as e:
@@ -353,7 +355,7 @@ def baixar_gr_siafe_por_valor(
     try:
         def consulta_por_valor(siafe: Siafe) -> str | None:
             return siafe.consultar_GR_valor(
-                valor_pesquisa, versao_siafe, data_pagamento=data_pagamento,
+                valor_pesquisa, versao_siafe, CODIGO_UG_SIAFE, data_pagamento=data_pagamento,
                 primeira_consulta=primeira_consulta,
             )
 
