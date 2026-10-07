@@ -140,6 +140,7 @@ def gerar_planilha_resgate(
     contas_encontradas: set[str] = set()
 
     estilo_linha_dados = _capturar_estilo_linha(ws_modelo, PRIMEIRA_LINHA_DADOS)
+    largura_max: dict[str, int] = {}
 
     for offset, linha_diaria in enumerate(linhas_diarias):
         linha_destino = PRIMEIRA_LINHA_DADOS + offset
@@ -148,6 +149,16 @@ def gerar_planilha_resgate(
         for col_modelo, col_diario in MAPA_COLUNAS.items():
             valor = ws_diario[f"{col_diario}{linha_diaria[0].row}"].value
             ws_modelo[f"{col_modelo}{linha_destino}"] = valor
+            if col_modelo in ("F", "G", "H", "I"):
+                # formatado com separador de milhar, igual o number_format da célula (#,##0.00)
+                try:
+                    texto = f"{float(valor):,.2f}"
+                except (TypeError, ValueError):
+                    texto = str(valor)
+                largura_max[col_modelo] = max(largura_max.get(col_modelo, 0), len(texto))
+                if col_modelo == "I":
+                    # LC151 (coluna J) e formula (=I*0.3): mesma largura de I + "R$ " do formato
+                    largura_max[COLUNA_LC151] = largura_max["I"] + 3
 
         ws_modelo[f"{COLUNA_LC151}{linha_destino}"] = f"=I{linha_destino}*0.3"
 
@@ -169,6 +180,11 @@ def gerar_planilha_resgate(
     ws_modelo[f"{COLUNA_LC151}{linha_totais}"] = (
         f"=ROUND(SUM({COLUNA_LC151}{PRIMEIRA_LINHA_DADOS}:{COLUNA_LC151}{ultima_linha_dados}),2)"
     )
+
+    for col, largura in largura_max.items():
+        atual = ws_modelo.column_dimensions[col].width or 0
+        if largura + 2 > atual:
+            ws_modelo.column_dimensions[col].width = largura + 2
 
     caminho_saida.parent.mkdir(parents=True, exist_ok=True)
     wb_modelo.save(caminho_saida)
