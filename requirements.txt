@@ -1,10 +1,22 @@
+# --- Bibliotecas internas (EOP) ---
+TesouroEOP-UI
+jupiter-subtes==1.2.1
+automaweb>=1.0.7
+
+# --- Interface gráfica ---
+customtkinter>=5.2.0
+
+# --- Automação web ---
 selenium>=4.9.0
 undetected-chromedriver>=3.5.0
-customtkinter>=5.2.0
+urllib3>=1.26.0
+setuptools>=70.0.0
+
+# --- PDF / texto ---
 pdfplumber>=0.10.0
 num2words>=0.5.12
+
+# --- Dados e planilhas (módulo Depósito Judicial) ---
 pandas>=2.0.0
-urllib3>=1.26.0
-TesouroEOP-UI
-jupiter-subtes==1.1.9
-setuptools>=70.0.0
+openpyxl>=3.1.0
+pywin32>=306; sys_platform == "win32"
