@@ -47,7 +47,7 @@ class SeiApp(BaseApp):
     def __init__(self):
         cfg = AppConfig(
             app_name="Programa SEI",
-            app_version="1.0.0",
+            app_version="1.5.2",
             login_subtitle="⚠️ Faça Login com os dados do SEI. ⚠️",
             login_user_label="Usuário do SEI:",
             image_filename="img/SEI.png",
