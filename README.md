@@ -6,7 +6,7 @@
 [![Selenium](https://img.shields.io/badge/Selenium-WebDriver-green?logo=selenium)](https://www.selenium.dev/)
 [![CustomTkinter](https://img.shields.io/badge/UI-CustomTkinter-informational)](https://github.com/TomSchimansky/CustomTkinter)
 [![SQLite](https://img.shields.io/badge/Database-SQLite-lightgrey?logo=sqlite)](https://www.sqlite.org/)
-[![Versão](https://img.shields.io/badge/Versão-1.0.0-orange)](.)
+[![Versão](https://img.shields.io/badge/Versão-1.5.2-orange)](.)
 
 ---
 
@@ -159,8 +159,8 @@ pip install -r requirements.txt
 | `pdfplumber` | Extração de texto de PDFs |
 | `num2words` | Conversão de valores por extenso |
 | `pandas` | Formatação de timestamps no resumo de erros |
-| `TesouroEOP-UI` | Biblioteca da EOP/SUPCONC para geração da Interface Gráfica |
-| `jupiter-subtes` | Biblioteca da EOP/SUPCONC para automação do SIAFE-Rio2 |
+| `TesouroEOP-UI` | Biblioteca da EOP/SUPCONFI para geração da Interface Gráfica |
+| `jupiter-subtes` | Biblioteca da EOP/SUPCONFI para automação do SIAFE-Rio2 |
 
 ### 4. Execute o programa
 
@@ -326,5 +326,5 @@ Dúvidas, sugestões e reportes de inconsistências operacionais devem ser encam
 ---
 
 <div align="center">
-  <sub>EOP / SUPCONC — Tesouro do Estado do Rio de Janeiro &nbsp;|&nbsp; Versão 1.0.0</sub>
+  <sub>EOP / SUPCONFI — Tesouro do Estado do Rio de Janeiro &nbsp;|&nbsp; Versão 1.5.2</sub>
 </div>
