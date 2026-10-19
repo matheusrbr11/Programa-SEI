@@ -1,4 +1,4 @@
-# 📑 Programa SEI
+# 📑 Programa Argos
 
 > Automação da instrução de processos de Crédito em Conta e Depósito Judicial no SEI, desenvolvida pela **Equipe de Otimização Processual (EOP/SUPCONFI)** do **Tesouro do Estado do Rio de Janeiro**.
 
@@ -27,7 +27,7 @@
 
 ## 📌 Sobre o Projeto
 
-O **Programa SEI** é uma ferramenta de automação desenvolvida para a **Superintendência de Controles Financeiros (SUPCONFI)** do Tesouro do Estado do Rio de Janeiro, com o objetivo de automatizar a instrução de processos de **Crédito em Conta** e **Depósito Judicial** no sistema **SEI**.
+O **Programa Argos** é uma ferramenta de automação desenvolvida para a **Superintendência de Controles Financeiros (SUPCONFI)** do Tesouro do Estado do Rio de Janeiro, com o objetivo de automatizar a instrução de processos de **Crédito em Conta** e **Depósito Judicial** no sistema **SEI**.
 
 O sistema elimina a necessidade de localizar manualmente comprovantes de resgate, guias de recolhimento e dados de conta judicial, reduzindo erros operacionais e o tempo gasto na instrução processual, processando automaticamente:
 

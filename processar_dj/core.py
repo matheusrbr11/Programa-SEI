@@ -123,7 +123,7 @@ def configurar_ambiente() -> None:
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     sys.stdout.reconfigure(encoding="utf-8")
 
-    configurar_log("Programa SEI", PASTA_LOG_GERAL, PROJECT_BASE_PATH / "logs")
+    configurar_log("Programa Argos", PASTA_LOG_GERAL, PROJECT_BASE_PATH / "logs")
 
     stdout_handler = logging.StreamHandler(sys.stdout)
     stdout_handler.setFormatter(FormatterSemTraceback())
