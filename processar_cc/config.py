@@ -46,7 +46,7 @@ TITULO_DESPACHO = "À SUBAFIN,"
 # modelo com sufixo B, qualquer outro usuário usa o modelo com sufixo M.
 _SUFIXO_DESPACHO_USUARIO = "B" if os.getlogin().lower() == "bdeza" else "M"
 DESPACHO_PADRAO = f"DPJ_{_SUFIXO_DESPACHO_USUARIO}"
-BLOCO_ASSINATURA = "1240785 - Assinatura de despachos da COOCCB"
+BLOCO_ASSINATURA = "1437591 - BLOCO PARA ASSINATURAS DOS DESPACHOS DA COOCB - SUPCONFI"
 ORGAO_SEI_PADRAO = "SEFAZ"
 CAMPOS_OBRIGATORIOS_DESPACHO = ("valor", "data", "num_documento")
 
