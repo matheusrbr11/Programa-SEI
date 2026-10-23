@@ -6,13 +6,11 @@ from pathlib import Path
 import unicodedata
 import pdfplumber
 import automaweb
-import logging
 import time
 import re
 
 from .config import MESES, PASTA_GR
-
-log = logging.getLogger("jupiter.processarCC")
+from .log import log
 
 def navegador_perdido(exc: BaseException) -> bool:
     """Verifica se a exceção (ou alguma na sua cadeia de causas) indica que o
@@ -196,7 +194,7 @@ def localizar_arquivo_em_disco(
 
 
 def localizar_gr_em_disco(num_documento: str | None = None) -> str | None:
-    """Wrapper específico para GRs."""
+    """Wrapper específico para GRs. Só busca por número de documento."""
     if num_documento:
         return localizar_arquivo_em_disco(PASTA_GR, substring=num_documento)
     return None

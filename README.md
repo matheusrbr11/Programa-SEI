@@ -101,7 +101,7 @@ Os dois módulos — **Crédito em Conta** e **Depósito Judicial** — seguem o
 └───────────────────────────────────────────────────────────┘
 ```
 
-Os módulos `processar_cc/` e `processar_dj/` são independentes entre si (cada um com seu próprio `orchestrator.py`, `services.py`, `extractors.py`, `core.py` e `config.py`), mas seguem a mesma estrutura interna e são acionados pela mesma interface (`main.py`), cada um via seu próprio subprocesso (`run_processar_cc.py` / `run_processar_dj.py`).
+Os módulos `processar_cc/` e `processar_dj/` seguem a mesma estrutura interna (cada um com seu próprio `orchestrator.py`, `services.py`, `extractors.py`, `core.py` e `config.py`) e são acionados pela mesma interface (`main.py`), cada um via seu próprio subprocesso (`run_processar_cc.py` / `run_processar_dj.py`). O que é idêntico nos dois fluxos (utilitários, exceções, setup de log, entry-point e constantes comuns) fica em `processar_comum/`.
 
 **Fluxo de dados:**
 
@@ -181,25 +181,33 @@ Programa SEI/
 ├── run_processar_dj.py      # Entry-point do subprocesso de Depósito Judicial
 ├── config.example.json      # Modelo de configuração
 │
+├── ambiente.py              # Produção/Homologação e caminhos que dependem dele
+│
+├── processar_comum/         # Código comum aos dois fluxos
+│   ├── main.py               #   Entry-point: lê credenciais e executa a etapa
+│   ├── core.py                #   Exceções e setup de log do subprocesso
+│   ├── log.py                 #   Logger do fluxo em execução
+│   ├── extractors.py         #   Extração de dados dos PDFs (comprovante, ofício, alvará, mandado)
+│   ├── utils.py               #   Funções utilitárias
+│   └── config.py              #   Constantes comuns, URLs, caminhos
+│
 ├── processar_cc/            # Automação do Crédito em Conta
 │   ├── main.py               #   Entry-point do subprocesso
 │   ├── orchestrator.py       #   Casos de uso: coleta e finalização em lote
 │   ├── services.py           #   Integrações externas (BB, SIAFE, SEI)
-│   ├── extractors.py         #   Extração de dados dos PDFs
-│   ├── core.py                #   Exceções, dataclasses, persistência
-│   ├── utils.py               #   Funções utilitárias
-│   └── config.py              #   Constantes de negócio, URLs, caminhos
+│   ├── extractors.py         #   Ordem de prioridade dos extratores no fluxo
+│   ├── core.py                #   Persistência
+│   └── config.py              #   Constantes de negócio do fluxo
 │
 ├── processar_dj/            # Automação do Depósito Judicial
 │   ├── main.py               #   Entry-point do subprocesso
 │   ├── orchestrator.py       #   Casos de uso: coleta e finalização em lote
 │   ├── services.py           #   Integrações externas (BB, SIAFE, SEI, SharePoint)
-│   ├── extractors.py         #   Extração de dados dos PDFs
+│   ├── extractors.py         #   Ordem de prioridade dos extratores no fluxo
 │   ├── planilha.py            #   Geração da planilha de Resgate (Comprovante DJO)
 │   ├── pdf.py                  #   Conversão da planilha de Resgate para PDF
-│   ├── core.py                #   Exceções, dataclasses, persistência
-│   ├── utils.py               #   Funções utilitárias
-│   └── config.py              #   Constantes de negócio, URLs, caminhos
+│   ├── core.py                #   Persistência
+│   └── config.py              #   Constantes de negócio do fluxo
 │
 ├── planilhas/
 │   ├── Resgate Modelo.xlsx                   # Template usado na geração da planilha de Resgate (Comprovante DJO)

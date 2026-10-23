@@ -12,7 +12,7 @@ import os
 
 from eop_ui import AppConfig, BaseApp
 from jupiter import configurar_log, Siafe, GraphAPI
-from processar_cc.config import PASTA_LOG_GERAL
+from ambiente import PASTA_LOG_GERAL
 
 logger = logging.getLogger("jupiter.SEI")
 

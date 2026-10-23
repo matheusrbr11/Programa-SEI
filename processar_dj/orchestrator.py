@@ -4,23 +4,27 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import NoReturn
 import logging
 import time
 
 from jupiter import SEI, Siafe
 
+from processar_comum.config import (
+    ORGAO_SEI_PADRAO, NIVEL_ACESSO_SEI, HIPOTESE_LEGAL, TITULO_DESPACHO,
+    BLOCO_ASSINATURA, SAIR_SIAFE, PASTA_GR, VERSAO_SEI, VERSAO_SIAFE_RIO_2, VERSAO_SIAFE_RIO_1,
+)
 from .config import (
-    ORGAO_SEI_PADRAO, MARCADOR_FILTRO, CONTAS_PROCESSAR, TIPOS_NAO_PGE,
-    NIVEL_ACESSO_SEI, HIPOTESE_LEGAL, DESPACHO_PADRAO, TITULO_DESPACHO,
-    BLOCO_ASSINATURA, MARCADOR_CONCLUIDO, CAMINHO_TEMPLATE_RESGATE, PASTA_GR,
-    NOME_TITULO_GR, NOME_TITULO_COMPROVANTE_BB, NOME_TITULO_COMPROVANTE_DJO,
-    SAIR_SIAFE,
+    MARCADOR_FILTRO, MARCADOR_CONCLUIDO, CONTAS_PROCESSAR, TIPOS_NAO_PGE, DESPACHO_PADRAO,
+    CAMINHO_TEMPLATE_RESGATE, NOME_TITULO_GR, NOME_TITULO_COMPROVANTE_BB, NOME_TITULO_COMPROVANTE_DJO,
+)
+from processar_comum.core import (
+    ErroProcesso, ErroExtracao, ErroValidacao, ErroDownload, ErroSEI,
+    ErroLoginSEI, ErroLoginSiafe,
 )
 from .core import (
     inicializar_tabela_processos, upsert_processo,
     buscar_processo_por_numero, buscar_processo_por_status,
-    ErroProcesso, ErroExtracao, ErroValidacao, ErroDownload, ErroSEI,
-    ErroLoginSEI, ErroLoginSiafe,
 )
 from .services import (
     mapear_estado_documentos, encontrar_dados_em_anexos, extrair_dados_comprovante_do_processo,
@@ -30,12 +34,15 @@ from .services import (
 )
 from .planilha import gerar_planilha_resgate
 from .pdf import converter_planilha_para_pdf
-from .utils import (
+from processar_comum.utils import (
     localizar_gr_em_disco, mensagem_curta, navegador_perdido,
     sessao_siafe_viva, sessao_sei_viva,
 )
 
 log = logging.getLogger("jupiter.processarDJ")
+
+# despacho incluído sem formatação confirmada: fora das Etapas 1 e 2 até revisão manual
+STATUS_REVISAR_DESPACHO = "revisar_despacho"
 
 
 # ---------------------------------------------------------------------------
@@ -56,11 +63,11 @@ def validar_dados_extraidos(dados: dict) -> None:
 
 
 def determinar_versao_siafe(ano: int) -> tuple[int, str]:
-    """Retorna (versao_siafe, nome_amigavel) com base no ano."""
+    """Retorna (versao_siafe, nome_amigavel) com base no ano e no ambiente."""
     if ano >= 2024:
-        return 1, "SIAFE-Rio 2"
+        return VERSAO_SIAFE_RIO_2, "SIAFE-Rio 2"
     if 2016 <= ano <= 2023:
-        return 4, "SIAFE-Rio 1"
+        return VERSAO_SIAFE_RIO_1, "SIAFE-Rio 1"
     raise ErroValidacao(f"Ano {ano} inválido. O ano deve ser 2016 ou superior.")
 
 
@@ -248,8 +255,24 @@ def coletar_dados_processo(sei: SEI, processo: str) -> dict:
 # ---------------------------------------------------------------------------
 # Etapa 2 — Finalização do processo no SEI
 # ---------------------------------------------------------------------------
+def _retirar_para_revisao_despacho(processo: str, erro: Exception) -> NoReturn:
+    """O despacho já foi incluído no processo, mas a formatação não foi
+    confirmada. Grava o status 'revisar_despacho', que tira o processo das
+    Etapas 1 e 2: sem isso, a próxima execução veria o despacho na árvore e
+    seguiria para o bloco de assinatura com o texto do modelo.
+
+    Depois de revisar o despacho no SEI, conclua o processo manualmente ou
+    volte o status para 'dados_coletados' para o programa finalizá-lo."""
+    upsert_processo(processo=processo, status=STATUS_REVISAR_DESPACHO)
+    raise ErroSEI(
+        f"Despacho incluído, mas a formatação não foi confirmada ({mensagem_curta(erro)}). "
+        f"Processo retirado do fluxo automático: revise o despacho no SEI."
+    ) from erro
+
+
 def finalizar_processo(
     sei: SEI, registro_db: dict, processos_no_marcador: set[str] | None = None,
+    marcador_filtro: str = MARCADOR_FILTRO,
 ) -> tuple[bool, bool]:
     """ETAPA 2 — Finaliza um processo no SEI:
       1. Anexa o Comprovante de Resgate (se necessário).
@@ -371,31 +394,38 @@ def finalizar_processo(
         try:
             if not sei.incluir_despacho(DESPACHO_PADRAO, NIVEL_ACESSO_SEI, HIPOTESE_LEGAL):
                 raise ErroSEI("Despacho não confirmado pelo SEI.")
+        except ErroSEI:
+            raise
+        except Exception as e:
+            raise ErroSEI(f"Erro ao inserir despacho: {e}")
 
+        # o despacho já está no processo: daqui em diante, uma falha não pode deixá-lo seguir para assinatura
+        try:
             despacho_completo = formatar_despacho_dj_inserido(
                 sei, registro_despacho, TITULO_DESPACHO, lista_nomes_inicial,
                 valor_resgate_float, valor_30_float,
             )
-            if not despacho_completo:
-                log.warning(f"Processo {processo}: despacho incluído com dados incompletos.")
-        except (ErroSEI, ErroValidacao):
-            raise
         except Exception as e:
-            raise ErroSEI(f"Erro ao formatar/inserir despacho: {e}")
+            _retirar_para_revisao_despacho(processo, e)
+        if not despacho_completo:
+            log.warning(f"Processo {processo}: despacho incluído com dados incompletos.")
         upsert_processo(processo=processo, status="dados_coletados", tem_despacho_apos_gr=1)
 
     # 5. Bloco de assinatura
     try:
-        sei.incluir_processo_bloco(BLOCO_ASSINATURA)
+        incluido = sei.incluir_processo_bloco(BLOCO_ASSINATURA)
     except Exception as e:
         raise ErroSEI(f"Erro ao incluir processo no bloco de assinatura: {e}")
+    if not incluido:
+        raise ErroSEI(f"Bloco de assinatura '{BLOCO_ASSINATURA}' não encontrado no SEI.")
 
-    # 6. Alterar marcador
+    # 6. Alterar marcador (adiciona o novo antes de remover o de filtro: nunca fica sem marcador)
     try:
-        sei.remover_marcador(processo)
-        sei.adicionar_marcador(MARCADOR_CONCLUIDO, processo, flag_removido=True)
+        trocado = sei.trocar_marcador(processo, de=marcador_filtro, para=MARCADOR_CONCLUIDO)
     except Exception as e:
         raise ErroSEI(f"Erro ao alterar marcador para '{MARCADOR_CONCLUIDO}': {e}")
+    if not trocado:
+        raise ErroSEI(f"Troca de marcador para '{MARCADOR_CONCLUIDO}' não confirmada pelo SEI.")
 
     log.info(f"Processo {processo} concluido com sucesso.")
     return True, despacho_completo
@@ -565,6 +595,7 @@ def _baixar_gr_pendentes_em_lote(siafe_usuario: str, siafe_senha: str, estatisti
                     else:
                         caminho_gr = baixar_gr_siafe_por_valor(
                             siafe, reg["valor_pesquisa"], versao_siafe,
+                            data_pagamento=reg.get("data_pagamento"),
                             primeira_consulta=primeira_consulta,
                         )
                     num_doc = num_doc_salvo
@@ -634,7 +665,7 @@ def etapa1_coletar(
         sei.abrir_driver(tempo_wait=20)
         log.info("[ETAPA 1] Iniciando navegador")
         log.info("[ETAPA 1] Autenticando no SEI")
-        if not sei.logar_sei(sei_user, sei_pass, orgao_sei):
+        if not sei.logar_sei(VERSAO_SEI, sei_user, sei_pass, orgao_sei):
             raise ErroLoginSEI("Falha no login SEI.")
 
         processos_debug = buscar_processo_por_status("debug")
@@ -667,6 +698,11 @@ def etapa1_coletar(
                 if status_existente in ("dados_coletados", "concluido"):
                     log.info(f"[{i}/{total}] {processo} ja possui dados coletados/concluido. Pulando.")
                     estatisticas["ja_prontos"] += 1
+                    print(f"__PROGRESSO__:{i}:{total}", flush=True)
+                    continue
+                if status_existente == STATUS_REVISAR_DESPACHO:
+                    log.warning(f"[{i}/{total}] {processo} aguardando revisão manual do despacho. Pulando.")
+                    estatisticas["ignorados"] += 1
                     print(f"__PROGRESSO__:{i}:{total}", flush=True)
                     continue
                 if status_existente == "aguardando_gr":
@@ -738,7 +774,7 @@ def etapa2_finalizar(
         sei.abrir_driver(tempo_wait=20)
         log.info("[ETAPA 2] Iniciando navegador")
         log.info("[ETAPA 2] Autenticando no SEI")
-        if not sei.logar_sei(sei_user, sei_pass, orgao_sei):
+        if not sei.logar_sei(VERSAO_SEI, sei_user, sei_pass, orgao_sei):
             raise ErroLoginSEI("Falha no login SEI.")
 
         processos_debug = buscar_processo_por_status("debug")
@@ -776,7 +812,7 @@ def etapa2_finalizar(
             navegador_com_perda = False
             inicio = time.monotonic()
             try:
-                finalizado, despacho_completo = finalizar_processo(sei, reg, processos_no_marcador)
+                finalizado, despacho_completo = finalizar_processo(sei, reg, processos_no_marcador, marcador_filtro)
                 if finalizado:
                     upsert_processo(
                         processo=processo, status="concluido",

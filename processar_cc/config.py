@@ -1,34 +1,13 @@
-"""Constantes, URLs, regex globais e configurações de negócio."""
+"""Constantes e configurações de negócio do Crédito em Conta.
 
-from pathlib import Path
-import os
+O que é comum aos dois fluxos fica em ``processar_comum.config``."""
 
-# ---------------------------------------------------------------------------
-# Paths
-# ---------------------------------------------------------------------------
-PROJECT_BASE_PATH = Path(__file__).resolve().parent.parent
-PASTA_LOG_GERAL = r"\\cifs-zone1\tesouro\Programas da SUPCONC\logs\Programa SEI"
-PASTA_GR = Path(r"//cifs-zone1/tesouro/Programas da SUPCONC/GRs PRJ")
-CAMINHO_HERMES = Path(r"\\cifs-zone1\tesouro\Programas da SUPCONC\Programa Hermes\base de dados\hermes.db")
-CAMINHO_DRIVER_EDGE = str(PROJECT_BASE_PATH / "driver" / "msedgedriver.exe")
+from processar_comum.config import SUFIXO_DESPACHO_USUARIO
 
 # ---------------------------------------------------------------------------
-# URLs
+# Contas
 # ---------------------------------------------------------------------------
-URL_SIAFE2 = "https://siafe2.fazenda.rj.gov.br/Siafe/faces/login.jsp"
-URL_SIAFE1 = "https://www5.fazenda.rj.gov.br/SiafeRio/faces/login.jsp"
-URL_BB = "https://www63.bb.com.br/portalbb/djo/id/resgate/dadosResgate,802,4647,500828,0,1,1.bbx"
-URL_SIAFE = {1: URL_SIAFE2, 4: URL_SIAFE1}
-SAIR_SIAFE = '//*[@id="pt1:pt_rhcl1:pt_np1:pt_cni2"]'
-
-# ---------------------------------------------------------------------------
-# Contas e CNPJ
-# ---------------------------------------------------------------------------
-CONTA_PROCESSAR = "00000291632-0"
-CNPJ_PRINCIPAL = "42.498.675/0001-52"
-CNPJ_ALTERNATIVO = "42.498.600/0001-71"
-
-CODIGO_UG_SIAFE = "999900"
+CONTAS_PROCESSAR = ("00000291632-0",)
 
 # ---------------------------------------------------------------------------
 # Marcadores SEI
@@ -39,49 +18,15 @@ MARCADOR_CONCLUIDO = "PGE - Credito em Conta - Concluido"
 # ---------------------------------------------------------------------------
 # Documentos / Títulos
 # ---------------------------------------------------------------------------
-NOME_PDF_PGE = "Documento"
-TITULO_DESPACHO = "À SUBAFIN,"
-
-# Modelo de despacho salvo no SEI é individual por usuário; 'bdeza' usa o
-# modelo com sufixo B, qualquer outro usuário usa o modelo com sufixo M.
-_SUFIXO_DESPACHO_USUARIO = "B" if os.getlogin().lower() == "bdeza" else "M"
-DESPACHO_PADRAO = f"DPJ_{_SUFIXO_DESPACHO_USUARIO}"
-BLOCO_ASSINATURA = "1240785 - Assinatura de despachos da COOCCB"
-ORGAO_SEI_PADRAO = "SEFAZ"
+DESPACHO_PADRAO = f"DPJ_{SUFIXO_DESPACHO_USUARIO}"
 CAMPOS_OBRIGATORIOS_DESPACHO = ("valor", "data", "num_documento")
 
 # ---------------------------------------------------------------------------
 # SEI
 # ---------------------------------------------------------------------------
-NIVEL_ACESSO_SEI = "restrito"
-HIPOTESE_LEGAL = "Controle Interno (Art. 26, § 3º, da Lei nº 10.180/2001)"
 TIPOS_NAO_PGE = ("Guia de Recolhimento", "Comprovante de Resgate", "Despacho")
 
 # ---------------------------------------------------------------------------
 # Banco
 # ---------------------------------------------------------------------------
 TABELA_PROCESSOS = "processos_credito_conta"
-
-# ---------------------------------------------------------------------------
-# Meses (data por extenso)
-# ---------------------------------------------------------------------------
-MESES = {
-    "janeiro": "01", "fevereiro": "02", "março": "03", "abril": "04",
-    "maio": "05", "junho": "06", "julho": "07", "agosto": "08",
-    "setembro": "09", "outubro": "10", "novembro": "11", "dezembro": "12",
-}
-
-# ---------------------------------------------------------------------------
-# Regex reutilizáveis
-# ---------------------------------------------------------------------------
-PADRAO_CNJ = (
-    r"(\d{7}[\.\-\s]?\d{2}[\.\-\s]?\d{4}[\.\-\s]?\d[\.\-\s]?\d{2}[\.\-\s]?\d{4}"
-    r"|\d{4}[\.\-\s]?\d{3}[\.\-\s]?\d{6}[\.\-\s]?\d"
-    r"|\d{14,20})"
-)
-PADRAO_DATA_EXTENSO = (
-    r"(?:^|\n)\s*[A-Za-zÀ-ÿ\s]{3,30}?\,\s*(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})"
-)
-PADRAO_CNPJ = r"(\d{2}[\.\s]?\d{3}[\.\s]?\d{3}[\/\s]?\d{4}[\-\s]{0,3}\d{2})"
-
-CNPJ_ESTADO = r"(42\.?498\.?675/0001-?52)"

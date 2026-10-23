@@ -17,18 +17,22 @@ from jupiter import Siafe, SEI, SharePoint
 from jupiter.seilibrary_xpaths import xpaths_processos
 import automaweb
 
-from .config import (
+from processar_comum.config import (
     URL_BB, URL_SIAFE, CAMINHO_DRIVER_EDGE, CAMINHO_HERMES, PASTA_GR,
-    CONTAS_PROCESSAR, NOME_PDF_PGE, NOME_TITULO_GR, NOME_TITULO_COMPROVANTE_BB,
+    NOME_PDF_PGE, CNPJ_PRINCIPAL, CNPJ_ALTERNATIVO, CODIGO_UG_SIAFE,
+)
+from .config import (
+    CONTAS_PROCESSAR, NOME_TITULO_GR, NOME_TITULO_COMPROVANTE_BB,
     NOME_TITULO_COMPROVANTE_DJO, CAMINHO_COOKIES_SHAREPOINT, NOMES_MESES,
     PASTA_BASE_SHAREPOINT, PREFIXO_ARQUIVO_DIARIO, SITE_SHAREPOINT, CAMPOS_OBRIGATORIOS_DESPACHO,
-    CAMPOS_COMPLEMENTAVEIS, CNPJ_PRINCIPAL, CNPJ_ALTERNATIVO, CODIGO_UG_SIAFE,
+    CAMPOS_COMPLEMENTAVEIS,
 )
-from .core import (
+from processar_comum.extractors import ExtratorComprovante, ExtratorAgendamento
+from processar_comum.core import (
     ErroSEI, ErroSIAFE, ErroBB, ErroLoginSiafe, ErroExtracao, ErroValidacao,
     ErroDownload, ErroDadosNaoLocalizadosBB,
 )
-from .utils import (
+from processar_comum.utils import (
     buscar_regex,
     extrair_texto_pdf,
     formatar_nome_arquivo,
@@ -225,8 +229,6 @@ def consultar_conta_judicial(lista_dados: list[dict]) -> dict | None:
     Para cada conjunto de dados (conta judicial, CNPJ, data), tenta obter
     o comprovante do BB (do disco ou baixando) e extrair seus dados.
     """
-    from .extractors import ExtratorComprovante, ExtratorAgendamento
-
     extratores_resgate_bb = (ExtratorComprovante, ExtratorAgendamento)
 
     ultimo_dado_valido = None
@@ -252,7 +254,7 @@ def consultar_conta_judicial(lista_dados: list[dict]) -> dict | None:
             log.warning(f"Comprovante para {conta_judicial} não contém o título esperado.")
             continue
 
-        dados = extrator.extrair(texto_comprovante)
+        dados = extrator.extrair(texto_comprovante, CONTAS_PROCESSAR)
         if not dados:
             log.warning(f"Não foi possível extrair dados do comprovante de {conta_judicial}")
             continue
@@ -350,6 +352,7 @@ def baixar_gr_siafe_por_valor(
     siafe: Siafe,
     valor_pesquisa: float,
     versao_siafe: int,
+    data_pagamento: str | None = None,
     *,
     primeira_consulta: bool = True,
 ) -> str | None:
@@ -361,7 +364,10 @@ def baixar_gr_siafe_por_valor(
     """
     try:
         def consulta(siafe: Siafe, *, valor: float, primeira: bool) -> str | None:
-            return siafe.consultar_GR_valor(valor, versao_siafe, CODIGO_UG_SIAFE, primeira_consulta=primeira)
+            return siafe.consultar_GR_valor(
+                valor, versao_siafe, CODIGO_UG_SIAFE, data_pagamento=data_pagamento,
+                primeira_consulta=primeira,
+            )
 
         resultado = _consultar_e_baixar_gr(
             siafe, valor_pesquisa, lambda s: consulta(s, valor=valor_pesquisa, primeira=primeira_consulta),
@@ -484,11 +490,9 @@ def encontrar_dados_em_anexos(sei: SEI, candidatos: list[str]) -> dict | None:
 
 def extrair_dados_comprovante_do_processo(sei: SEI, nome_comprovante: str) -> dict | None:
     """Quando o comprovante já existe no processo, extrai diretamente."""
-    from .extractors import ExtratorComprovante
-
     log.info(f"Comprovante ja presente no processo ('{nome_comprovante}'). Extraindo...")
     texto_pdf = baixar_e_extrair_texto(sei, nome_comprovante)
-    return ExtratorComprovante.extrair(texto_pdf)
+    return ExtratorComprovante.extrair(texto_pdf, CONTAS_PROCESSAR)
 
 
 def _valor_por_extenso(valor_float: float) -> str:
@@ -521,16 +525,19 @@ def formatar_despacho_dj_inserido(
 
     Retorna False quando algum campo obrigatório do despacho não estava
     disponível no banco de dados, indicando que o despacho foi
-    incluído apenas parcialmente e precisa de complementação manual."""
+    incluído apenas parcialmente e precisa de complementação manual.
+
+    Lança ``ErroSEI`` quando o SEI não confirma a formatação (despacho não
+    salvo, placeholder não substituído ou link não aplicado)."""
     despacho_completo = all(registro.get(campo) for campo in CAMPOS_OBRIGATORIOS_DESPACHO)
 
     nome_despacho_encaminhamento = next(
         (n for n in lista_nomes if "Despacho de Encaminhamento de Processo" in n), None
     )
     index_despacho = buscar_regex(nome_despacho_encaminhamento, r"(\d+)") if nome_despacho_encaminhamento else None
-    index_comprovante = sei.copiar_informacoes_documento(NOME_TITULO_COMPROVANTE_BB)
-    index_comprovante_djo = sei.copiar_informacoes_documento(NOME_TITULO_COMPROVANTE_DJO)
-    index_gr = sei.copiar_informacoes_documento(NOME_TITULO_GR)
+    index_comprovante = sei.obter_numero_documento(NOME_TITULO_COMPROVANTE_BB)
+    index_comprovante_djo = sei.obter_numero_documento(NOME_TITULO_COMPROVANTE_DJO)
+    index_gr = sei.obter_numero_documento(NOME_TITULO_GR)
 
     mapa_texto = {
         "@tratamento_destinatario@ @cargo_destinatario@,": titulo,
@@ -559,7 +566,8 @@ def formatar_despacho_dj_inserido(
         ) if v
     ]
 
-    sei.formatar_despacho_DJ(mapa_texto, mapa_links)
+    if not sei.formatar_despacho(mapa_texto, mapa_links):
+        raise ErroSEI("Formatação do despacho não confirmada pelo SEI.")
     return despacho_completo
 
 
@@ -574,8 +582,10 @@ def mapear_estado_documentos(sei: SEI, processo: str) -> dict:
             sei.sair_iframe()
         except Exception:
             pass
-        sei.pesquisar_processo(processo)
-        sei.expandir_pastas()
+        if not sei.pesquisar_processo(processo):
+            raise ErroSEI(f"Processo {processo} não foi aberto pela pesquisa do SEI.")
+        if not sei.expandir_pastas(): # árvore incompleta faria um documento existente parecer ausente
+            raise ErroSEI("Nem todas as pastas da árvore abriram; a árvore pode estar incompleta.")
 
         try:
             sei.sair_iframe()

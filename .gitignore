@@ -6,4 +6,4 @@ logs/*
 config.json
 .claude/*
 *.db
-
+homologacao/

@@ -17,16 +17,17 @@ from jupiter import Siafe, SEI
 from jupiter.seilibrary_xpaths import xpaths_processos
 import automaweb
 
-from .config import (
+from processar_comum.config import (
     URL_BB, URL_SIAFE, CAMINHO_DRIVER_EDGE, CAMINHO_HERMES, PASTA_GR,
-    CONTA_PROCESSAR, NOME_PDF_PGE, CAMPOS_OBRIGATORIOS_DESPACHO,
-    CNPJ_PRINCIPAL, CNPJ_ALTERNATIVO, CODIGO_UG_SIAFE,
+    NOME_PDF_PGE, CNPJ_PRINCIPAL, CNPJ_ALTERNATIVO, CODIGO_UG_SIAFE,
 )
-from .core import (
+from .config import CONTAS_PROCESSAR, CAMPOS_OBRIGATORIOS_DESPACHO
+from processar_comum.extractors import ExtratorComprovante, ExtratorAgendamento
+from processar_comum.core import (
     ErroSEI, ErroSIAFE, ErroBB, ErroLoginSiafe, ErroExtracao, ErroValidacao,
     ErroDownload, ErroDadosNaoLocalizadosBB,
 )
-from .utils import (
+from processar_comum.utils import (
     buscar_regex,
     extrair_texto_pdf,
     formatar_nome_arquivo,
@@ -224,8 +225,6 @@ def consultar_conta_judicial(lista_dados: list[dict]) -> dict | None:
     Para cada conjunto de dados (conta judicial, CNPJ, data), tenta obter
     o comprovante do BB (do disco ou baixando) e extrair seus dados.
     """
-    from .extractors import ExtratorComprovante, ExtratorAgendamento
-
     extratores_resgate_bb = (ExtratorComprovante, ExtratorAgendamento)
 
     ultimo_dado_valido = None
@@ -251,7 +250,7 @@ def consultar_conta_judicial(lista_dados: list[dict]) -> dict | None:
             log.warning(f"Comprovante para {conta_judicial} não contém o título esperado.")
             continue
 
-        dados = extrator.extrair(texto_comprovante)
+        dados = extrator.extrair(texto_comprovante, CONTAS_PROCESSAR)
         if not dados:
             log.warning(f"Não foi possível extrair dados do comprovante de {conta_judicial}")
             continue
@@ -261,7 +260,7 @@ def consultar_conta_judicial(lista_dados: list[dict]) -> dict | None:
         dados["cnpj"] = dados_oficio.get("cnpj")
         dados["data_alvara"] = dados_oficio.get("data_alvara")
 
-        if dados.get("conta") == CONTA_PROCESSAR:
+        if dados.get("conta") in CONTAS_PROCESSAR:
             return dados
 
         ultimo_dado_valido = dados
@@ -347,19 +346,35 @@ def baixar_gr_siafe_por_valor(
     *,
     primeira_consulta: bool = True,
 ) -> str | None:
-    """Download de GR via consulta por valor (anos 2016-2024).
+    """Download de GR via consulta por valor (anos 2016-2024), tentando o
+    valor exato e, se não achar, uma tentativa a mais com +R$ 0,01.
 
     Espera uma sessão ``siafe`` já aberta e autenticada (ver ``abrir_sessao_siafe``)
     para a versão/ano corretos.
     """
     try:
-        def consulta_por_valor(siafe: Siafe) -> str | None:
+        def consulta(siafe: Siafe, *, valor: float, primeira: bool) -> str | None:
             return siafe.consultar_GR_valor(
-                valor_pesquisa, versao_siafe, CODIGO_UG_SIAFE, data_pagamento=data_pagamento,
-                primeira_consulta=primeira_consulta,
+                valor, versao_siafe, CODIGO_UG_SIAFE, data_pagamento=data_pagamento,
+                primeira_consulta=primeira,
             )
 
-        return _consultar_e_baixar_gr(siafe, valor_pesquisa, consulta_por_valor)
+        resultado = _consultar_e_baixar_gr(
+            siafe, valor_pesquisa, lambda s: consulta(s, valor=valor_pesquisa, primeira=primeira_consulta),
+        )
+        if resultado:
+            return resultado
+
+        valor_mais_um_centavo = round(valor_pesquisa + 0.01, 2)
+        resultado = _consultar_e_baixar_gr(
+            siafe, valor_mais_um_centavo, lambda s: consulta(s, valor=valor_mais_um_centavo, primeira=False),
+        )
+        if resultado:
+            log.warning(
+                f"GR encontrada com +R$ 0,01 (calculado: R$ {valor_pesquisa:,.2f}, "
+                f"encontrado: R$ {valor_mais_um_centavo:,.2f})."
+            )
+        return resultado
     except Exception as e:
         raise ErroSIAFE(f"Erro no download SIAFE: {mensagem_curta(e)}") from e
 
@@ -417,7 +432,7 @@ def encontrar_dados_em_anexos(sei: SEI, candidatos: list[str]) -> dict | None:
             log.warning(f"  [{nome_doc}] Nenhum dado reconhecido.")
             continue
 
-        if dados.get("conta") == CONTA_PROCESSAR:
+        if dados.get("conta") in CONTAS_PROCESSAR:
             log.info(f"  [{nome_doc}] Dados encontrados.")
             return dados
 
@@ -428,11 +443,9 @@ def encontrar_dados_em_anexos(sei: SEI, candidatos: list[str]) -> dict | None:
 
 def extrair_dados_comprovante_do_processo(sei: SEI, nome_comprovante: str) -> dict | None:
     """Quando o comprovante já existe no processo, extrai diretamente."""
-    from .extractors import ExtratorComprovante
-
     log.info(f"Comprovante ja presente no processo ('{nome_comprovante}'). Extraindo...")
     texto_pdf = baixar_e_extrair_texto(sei, nome_comprovante)
-    return ExtratorComprovante.extrair(texto_pdf)
+    return ExtratorComprovante.extrair(texto_pdf, CONTAS_PROCESSAR)
 
 
 def _valor_por_extenso(valor_float: float) -> str:
@@ -461,7 +474,10 @@ def formatar_despacho_inserido(
 
     Retorna False quando algum campo obrigatório do despacho não estava
     disponível no banco de dados, indicando que o despacho foi incluído
-    apenas parcialmente e precisa de complementação manual."""
+    apenas parcialmente e precisa de complementação manual.
+
+    Lança ``ErroSEI`` quando o SEI não confirma a formatação (despacho não
+    salvo, placeholder não substituído ou link não aplicado)."""
     despacho_completo = all(registro.get(campo) for campo in CAMPOS_OBRIGATORIOS_DESPACHO)
 
     mapa_texto = {
@@ -474,7 +490,8 @@ def formatar_despacho_inserido(
     }
     mapa_links = {index_doc: index_doc} if index_doc else {}
 
-    sei.formatar_despacho(mapa_texto, mapa_links)
+    if not sei.formatar_despacho(mapa_texto, mapa_links):
+        raise ErroSEI("Formatação do despacho não confirmada pelo SEI.")
     return despacho_completo
 
 
@@ -487,8 +504,10 @@ def mapear_estado_documentos(sei: SEI, processo: str) -> dict:
     try:
         try: sei.sair_iframe()
         except Exception: pass
-        sei.pesquisar_processo(processo)
-        sei.expandir_pastas()
+        if not sei.pesquisar_processo(processo):
+            raise ErroSEI(f"Processo {processo} não foi aberto pela pesquisa do SEI.")
+        if not sei.expandir_pastas(): # árvore incompleta faria um documento existente parecer ausente
+            raise ErroSEI("Nem todas as pastas da árvore abriram; a árvore pode estar incompleta.")
 
         try:
             sei.sair_iframe()
