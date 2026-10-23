@@ -17,17 +17,17 @@ from jupiter import Siafe, SEI
 from jupiter.seilibrary_xpaths import xpaths_processos
 import automaweb
 
-from processar_comum.config import (
+from analise_comum.config import (
     URL_BB, URL_SIAFE, CAMINHO_DRIVER_EDGE, CAMINHO_HERMES, PASTA_GR,
     NOME_PDF_PGE, CNPJ_PRINCIPAL, CNPJ_ALTERNATIVO, CODIGO_UG_SIAFE,
 )
 from .config import CONTAS_PROCESSAR, CAMPOS_OBRIGATORIOS_DESPACHO
-from processar_comum.extractors import ExtratorComprovante, ExtratorAgendamento
-from processar_comum.core import (
+from analise_comum.extractors import ExtratorComprovante, ExtratorAgendamento
+from analise_comum.core import (
     ErroSEI, ErroSIAFE, ErroBB, ErroLoginSiafe, ErroExtracao, ErroValidacao,
     ErroDownload, ErroDadosNaoLocalizadosBB,
 )
-from processar_comum.utils import (
+from analise_comum.utils import (
     buscar_regex,
     extrair_texto_pdf,
     formatar_nome_arquivo,

@@ -10,14 +10,14 @@ import time
 
 from jupiter import SEI, Siafe
 
-from processar_comum.config import (
+from analise_comum.config import (
     ORGAO_SEI_PADRAO, NIVEL_ACESSO_SEI, HIPOTESE_LEGAL, TITULO_DESPACHO,
     BLOCO_ASSINATURA, SAIR_SIAFE, VERSAO_SEI, VERSAO_SIAFE_RIO_2, VERSAO_SIAFE_RIO_1,
 )
 from .config import (
     MARCADOR_FILTRO, MARCADOR_CONCLUIDO, CONTAS_PROCESSAR, TIPOS_NAO_PGE, DESPACHO_PADRAO,
 )
-from processar_comum.core import (
+from analise_comum.core import (
     ErroProcesso, ErroExtracao, ErroValidacao, ErroDownload, ErroSEI,
     ErroLoginSEI, ErroLoginSiafe,
 )
@@ -30,7 +30,7 @@ from .services import (
     buscar_gr_no_banco, baixar_gr_no_siafe, baixar_gr_siafe_por_valor,
     abrir_sessao_siafe, formatar_despacho_inserido, validar_valor_despacho_cc,
 )
-from processar_comum.utils import (
+from analise_comum.utils import (
     localizar_gr_em_disco, mensagem_curta, navegador_perdido,
     sessao_siafe_viva, sessao_sei_viva,
 )

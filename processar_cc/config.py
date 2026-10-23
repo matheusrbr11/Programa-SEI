@@ -1,8 +1,8 @@
 """Constantes e configurações de negócio do Crédito em Conta.
 
-O que é comum aos dois fluxos fica em ``processar_comum.config``."""
+O que é comum aos dois fluxos fica em ``analise_comum.config``."""
 
-from processar_comum.config import SUFIXO_DESPACHO_USUARIO
+from analise_comum.config import SUFIXO_DESPACHO_USUARIO
 
 # ---------------------------------------------------------------------------
 # Contas

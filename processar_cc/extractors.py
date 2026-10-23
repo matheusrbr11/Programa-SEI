@@ -1,10 +1,10 @@
 """Ordem de prioridade dos extratores no Crédito em Conta.
 
-Os extratores ficam em ``processar_comum.extractors``."""
+Os extratores ficam em ``analise_comum.extractors``."""
 
 from __future__ import annotations
 
-from processar_comum.extractors import (
+from analise_comum.extractors import (
     ExtratorComprovante,
     ExtratorAgendamento,
     ExtratorOficio,

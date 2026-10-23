@@ -6,7 +6,7 @@ import win32com.client as win32
 from pathlib import Path
 import logging
 
-from processar_comum.core import ErroProcesso
+from analise_comum.core import ErroProcesso
 
 log = logging.getLogger("jupiter.processarDJ")
 

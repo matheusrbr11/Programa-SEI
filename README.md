@@ -101,7 +101,7 @@ Os dois módulos — **Crédito em Conta** e **Depósito Judicial** — seguem o
 └───────────────────────────────────────────────────────────┘
 ```
 
-Os módulos `processar_cc/` e `processar_dj/` seguem a mesma estrutura interna (cada um com seu próprio `orchestrator.py`, `services.py`, `extractors.py`, `core.py` e `config.py`) e são acionados pela mesma interface (`main.py`), cada um via seu próprio subprocesso (`run_processar_cc.py` / `run_processar_dj.py`). O que é idêntico nos dois fluxos (utilitários, exceções, setup de log, entry-point e constantes comuns) fica em `processar_comum/`.
+Os módulos `processar_cc/` e `processar_dj/` seguem a mesma estrutura interna (cada um com seu próprio `orchestrator.py`, `services.py`, `extractors.py`, `core.py` e `config.py`) e são acionados pela mesma interface (`main.py`), cada um via seu próprio subprocesso (`run_processar_cc.py` / `run_processar_dj.py`). O que é idêntico nos dois fluxos (utilitários, exceções, setup de log, entry-point e constantes comuns) fica em `analise_comum/`.
 
 **Fluxo de dados:**
 
@@ -183,7 +183,7 @@ Programa SEI/
 │
 ├── ambiente.py              # Produção/Homologação e caminhos que dependem dele
 │
-├── processar_comum/         # Código comum aos dois fluxos
+├── analise_comum/           # Código comum aos dois fluxos
 │   ├── main.py               #   Entry-point: lê credenciais e executa a etapa
 │   ├── core.py                #   Exceções e setup de log do subprocesso
 │   ├── log.py                 #   Logger do fluxo em execução

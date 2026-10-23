@@ -185,7 +185,7 @@ class SeiApp(BaseApp):
         frame_etapas = self.make_section_frame()
         self.make_primary_button(
             frame_etapas, text="PROCESSAR PROCESSOS",
-            command=self._iniciar_processar_processos
+            command=self._iniciar_analisar_processos
         ).pack(pady=10)
         self.make_primary_button(
             frame_etapas, text="RESPONDER PROCESSOS",
@@ -193,7 +193,7 @@ class SeiApp(BaseApp):
         ).pack(pady=10)
         self._add_footer()
 
-    def _iniciar_processar_processos(self):
+    def _iniciar_analisar_processos(self):
 
         # se o siafe ja foi logado com sucesso nesta sessao, pula a tela de
         # login e roda a etapa 1 direto; senao, pede o login primeiro
@@ -259,7 +259,7 @@ class SeiApp(BaseApp):
         frame_etapas = self.make_section_frame()
         self.make_primary_button(
             frame_etapas, text="PROCESSAR PROCESSOS",
-            command=self._iniciar_processar_processos_dj
+            command=self._iniciar_analisar_processos_dj
         ).pack(pady=10)
         self.make_primary_button(
             frame_etapas, text="RESPONDER PROCESSOS",
@@ -267,7 +267,7 @@ class SeiApp(BaseApp):
         ).pack(pady=10)
         self._add_footer()
 
-    def _iniciar_processar_processos_dj(self):
+    def _iniciar_analisar_processos_dj(self):
 
         # se o siafe ja foi logado com sucesso nesta sessao, pula a tela de
         # login e roda a etapa 1 direto; senao, pede o login primeiro

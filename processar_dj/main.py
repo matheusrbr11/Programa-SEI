@@ -1,6 +1,6 @@
 """Entry point do Depósito Judicial — compatibilidade com chamada via stdin."""
 
-from processar_comum.main import executar
+from analise_comum.main import executar
 
 from .orchestrator import etapa1_coletar, etapa2_finalizar
 

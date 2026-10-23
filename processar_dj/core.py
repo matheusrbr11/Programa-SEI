@@ -1,6 +1,6 @@
 """Persistência do fluxo: tabela de processos no hermes.db.
 
-Exceções e setup de ambiente ficam em ``processar_comum.core``."""
+Exceções e setup de ambiente ficam em ``analise_comum.core``."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from contextlib import closing
 from typing import Any
 import sqlite3
 
-from processar_comum.config import CAMINHO_HERMES
+from analise_comum.config import CAMINHO_HERMES
 
 from .config import TABELA_PROCESSOS
 

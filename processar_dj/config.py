@@ -1,11 +1,11 @@
 """Constantes e configurações de negócio do Depósito Judicial.
 
-O que é comum aos dois fluxos fica em ``processar_comum.config``."""
+O que é comum aos dois fluxos fica em ``analise_comum.config``."""
 
 from pathlib import Path
 import tempfile
 
-from processar_comum.config import PROJECT_BASE_PATH, SUFIXO_DESPACHO_USUARIO
+from analise_comum.config import PROJECT_BASE_PATH, SUFIXO_DESPACHO_USUARIO
 
 # ---------------------------------------------------------------------------
 # Paths

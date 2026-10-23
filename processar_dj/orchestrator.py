@@ -10,7 +10,7 @@ import time
 
 from jupiter import SEI, Siafe
 
-from processar_comum.config import (
+from analise_comum.config import (
     ORGAO_SEI_PADRAO, NIVEL_ACESSO_SEI, HIPOTESE_LEGAL, TITULO_DESPACHO,
     BLOCO_ASSINATURA, SAIR_SIAFE, PASTA_GR, VERSAO_SEI, VERSAO_SIAFE_RIO_2, VERSAO_SIAFE_RIO_1,
 )
@@ -18,7 +18,7 @@ from .config import (
     MARCADOR_FILTRO, MARCADOR_CONCLUIDO, CONTAS_PROCESSAR, TIPOS_NAO_PGE, DESPACHO_PADRAO,
     CAMINHO_TEMPLATE_RESGATE, NOME_TITULO_GR, NOME_TITULO_COMPROVANTE_BB, NOME_TITULO_COMPROVANTE_DJO,
 )
-from processar_comum.core import (
+from analise_comum.core import (
     ErroProcesso, ErroExtracao, ErroValidacao, ErroDownload, ErroSEI,
     ErroLoginSEI, ErroLoginSiafe,
 )
@@ -34,7 +34,7 @@ from .services import (
 )
 from .planilha import gerar_planilha_resgate
 from .pdf import converter_planilha_para_pdf
-from processar_comum.utils import (
+from analise_comum.utils import (
     localizar_gr_em_disco, mensagem_curta, navegador_perdido,
     sessao_siafe_viva, sessao_sei_viva,
 )
