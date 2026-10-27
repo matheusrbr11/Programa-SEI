@@ -187,6 +187,7 @@ Programa SEI/
 │   ├── main.py               #   Entry-point: lê credenciais e executa a etapa
 │   ├── core.py                #   Exceções e setup de log do subprocesso
 │   ├── log.py                 #   Logger do fluxo em execução
+│   ├── repositorio.py         #   Persistência: tabela de processos de cada fluxo no hermes.db
 │   ├── extractors.py         #   Extração de dados dos PDFs (comprovante, ofício, alvará, mandado)
 │   ├── utils.py               #   Funções utilitárias
 │   └── config.py              #   Constantes comuns, URLs, caminhos
@@ -196,7 +197,7 @@ Programa SEI/
 │   ├── orchestrator.py       #   Casos de uso: coleta e finalização em lote
 │   ├── services.py           #   Integrações externas (BB, SIAFE, SEI)
 │   ├── extractors.py         #   Ordem de prioridade dos extratores no fluxo
-│   ├── core.py                #   Persistência
+│   ├── core.py                #   Tabela de processos do fluxo (configura o repositório)
 │   └── config.py              #   Constantes de negócio do fluxo
 │
 ├── processar_dj/            # Automação do Depósito Judicial
@@ -206,7 +207,7 @@ Programa SEI/
 │   ├── extractors.py         #   Ordem de prioridade dos extratores no fluxo
 │   ├── planilha.py            #   Geração da planilha de Resgate (Comprovante DJO)
 │   ├── pdf.py                  #   Conversão da planilha de Resgate para PDF
-│   ├── core.py                #   Persistência
+│   ├── core.py                #   Tabela de processos do fluxo (configura o repositório)
 │   └── config.py              #   Constantes de negócio do fluxo
 │
 ├── planilhas/

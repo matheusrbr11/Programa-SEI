@@ -3,7 +3,6 @@
 from __future__ import annotations
 from selenium.common.exceptions import WebDriverException, NoSuchElementException
 from pathlib import Path
-import unicodedata
 import pdfplumber
 import automaweb
 import time
@@ -144,15 +143,6 @@ def aguardar_novo_pdf(pasta: Path, arquivos_antes: set[Path], timeout: int = 30)
         time.sleep(1)
     log.warning("Nenhum PDF novo detectado na pasta Downloads.")
     return None
-
-
-def formatar_nome_arquivo(nome: str) -> str:
-    """Remove acentos, barras e contra-barras de nomes de arquivo."""
-    sem_acentos = "".join(
-        c for c in unicodedata.normalize("NFD", nome)
-        if unicodedata.category(c) != "Mn"
-    )
-    return sem_acentos.replace("/", "").replace("\\", "")
 
 
 _cache_pasta_gr: list[str] | None = None

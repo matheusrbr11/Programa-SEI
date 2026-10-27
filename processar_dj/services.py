@@ -14,7 +14,6 @@ import base64
 import re
 
 from jupiter import Siafe, SEI, SharePoint
-from jupiter.seilibrary_xpaths import xpaths_processos
 import automaweb
 
 from analise_comum.config import (
@@ -35,7 +34,6 @@ from analise_comum.core import (
 from analise_comum.utils import (
     buscar_regex,
     extrair_texto_pdf,
-    formatar_nome_arquivo,
     formatar_moeda,
     localizar_comprovante_em_disco,
     aguardar_novo_pdf,
@@ -396,12 +394,9 @@ def baixar_e_extrair_texto(sei: SEI, nome_doc: str) -> str:
     """Baixa documento do SEI, renomeia, extrai texto do PDF."""
     caminho_definitivo = Path.cwd() / "Documento.pdf"
     try:
-        if not sei.baixar_documento(nome_doc):
+        caminho_baixado = sei.baixar_documento(nome_doc)
+        if not caminho_baixado:
             raise ErroSEI(f"[{nome_doc}] Download falhou.")
-
-        caminho_baixado = Path.cwd() / f"{formatar_nome_arquivo(nome_doc)}.pdf"
-        if not caminho_baixado.exists():
-            raise ErroSEI(f"[{nome_doc}] Arquivo não localizado após download.")
 
         if caminho_baixado.resolve() != caminho_definitivo.resolve():
             if caminho_definitivo.exists():
@@ -588,9 +583,7 @@ def mapear_estado_documentos(sei: SEI, processo: str) -> dict:
             raise ErroSEI("Nem todas as pastas da árvore abriram; a árvore pode estar incompleta.")
 
         try:
-            sei.sair_iframe()
-            sei.entrar_iframe(xpaths_processos.iframe_conteudo_visualizacao)
-            acessivel = sei.verifica_existe(xpaths_processos.incluir_documento, timeout=3)
+            acessivel = sei.processo_acessivel()
         except Exception as e:
             if navegador_perdido(e):
                 raise
@@ -606,8 +599,7 @@ def mapear_estado_documentos(sei: SEI, processo: str) -> dict:
                 "acessivel": False,
             }
 
-        documentos_arvore = sei.analisar_documentos()
-        lista_nomes = list(documentos_arvore.keys())
+        lista_nomes = sei.listar_documentos() # só os nomes: não precisa abrir cada documento
 
         tem_gr = any(NOME_TITULO_GR in nome for nome in lista_nomes)
         tem_comprovante = any(NOME_TITULO_COMPROVANTE_BB in nome for nome in lista_nomes)

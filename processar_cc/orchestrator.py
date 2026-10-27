@@ -11,7 +11,7 @@ import time
 from jupiter import SEI, Siafe
 
 from analise_comum.config import (
-    ORGAO_SEI_PADRAO, NIVEL_ACESSO_SEI, HIPOTESE_LEGAL, TITULO_DESPACHO,
+    ORGAO_SEI_PADRAO, UNIDADE_SEI, NIVEL_ACESSO_SEI, HIPOTESE_LEGAL, TITULO_DESPACHO,
     BLOCO_ASSINATURA, SAIR_SIAFE, VERSAO_SEI, VERSAO_SIAFE_RIO_2, VERSAO_SIAFE_RIO_1,
 )
 from .config import (
@@ -581,8 +581,8 @@ def etapa1_coletar(
         sei.abrir_driver(tempo_wait=20)
         log.info("[ETAPA 1] Iniciando navegador")
         log.info("[ETAPA 1] Autenticando no SEI")
-        if not sei.logar_sei(VERSAO_SEI, sei_user, sei_pass, orgao_sei):
-            raise ErroLoginSEI("Falha no login SEI.")
+        if not sei.logar_sei(VERSAO_SEI, sei_user, sei_pass, orgao_sei, unidade=UNIDADE_SEI):
+            raise ErroLoginSEI(f"Falha no login SEI ou na troca para a unidade {UNIDADE_SEI}.")
 
         processos_debug = buscar_processo_por_status("debug")
         em_modo_debug = bool(processos_debug)
@@ -597,7 +597,7 @@ def etapa1_coletar(
         else:
             log.info("[ETAPA 1] Coletando processos no marcador")
             processos = sei.visualizar_processos_por_marcador(marcador_filtro)
-            lista_processos = sei.filtrar_processos_por_marcador(processos, marcador_filtro)
+            lista_processos = [p["processo"] for p in processos] # a visualização já é só do marcador
 
         if not lista_processos:
             log.warning(f"Nenhum processo encontrado com o marcador '{marcador_filtro}'")
@@ -690,8 +690,8 @@ def etapa2_finalizar(
         sei.abrir_driver(tempo_wait=20)
         log.info("[ETAPA 2] Iniciando navegador")
         log.info("[ETAPA 2] Autenticando no SEI")
-        if not sei.logar_sei(VERSAO_SEI, sei_user, sei_pass, orgao_sei):
-            raise ErroLoginSEI("Falha no login SEI.")
+        if not sei.logar_sei(VERSAO_SEI, sei_user, sei_pass, orgao_sei, unidade=UNIDADE_SEI):
+            raise ErroLoginSEI(f"Falha no login SEI ou na troca para a unidade {UNIDADE_SEI}.")
 
         processos_debug = buscar_processo_por_status("debug")
         em_modo_debug = bool(processos_debug)
@@ -717,9 +717,7 @@ def etapa2_finalizar(
         if not em_modo_debug:
             log.info("[ETAPA 2] Verificando marcador de filtro dos processos pendentes")
             processos_marcador = sei.visualizar_processos_por_marcador(marcador_filtro)
-            processos_no_marcador = set(
-                sei.filtrar_processos_por_marcador(processos_marcador, marcador_filtro)
-            )
+            processos_no_marcador = {p["processo"] for p in processos_marcador} # a visualização já é só do marcador
 
         log.info(f"[ETAPA 2] {total} processo(s) pendente(s) de finalizacao")
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import undetected_chromedriver as uc
 from jupiter import configurar_log
-import urllib3
 import logging
 import base64
 import sys
@@ -119,7 +118,6 @@ def configurar_ambiente(nome_logger: str) -> None:
     definir_logger_fluxo(nome_logger)
 
     uc.Chrome.__del__ = lambda self: None  # evita erro no __del__ do uc
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     sys.stdout.reconfigure(encoding="utf-8")
 
     configurar_log("Programa Argos", PASTA_LOG_GERAL, PROJECT_BASE_PATH / "logs")
