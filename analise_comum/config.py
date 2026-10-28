@@ -41,10 +41,10 @@ TITULO_DESPACHO = "À SUBAFIN,"
 # Modelo de despacho salvo no SEI é individual por usuário; 'bdeza' usa o
 # modelo com sufixo B, qualquer outro usuário usa o modelo com sufixo M.
 SUFIXO_DESPACHO_USUARIO = "B" if os.getlogin().lower() == "bdeza" else "M"
-BLOCO_ASSINATURA = "1437591 - BLOCO PARA ASSINATURAS DOS DESPACHOS DA COOCB - SUPCONFI"
+BLOCO_ASSINATURA = "1788 - Bloco Teste"
 ORGAO_SEI_PADRAO = "SEFAZ"
 # o SEI abre na última unidade usada; sem fixar, o marcador pode vir vazio e o lote "terminar" sem nada
-UNIDADE_SEI = "SEFAZ/COOCB"
+UNIDADE_SEI = "SEFAZ/SUPCONC1"
 
 # ---------------------------------------------------------------------------
 # SEI

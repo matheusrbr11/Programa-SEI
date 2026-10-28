@@ -53,7 +53,7 @@ TIPOS_NAO_PGE = ("Guia de Recolhimento", "Comprovante de Resgate", "Comprovante 
 # ---------------------------------------------------------------------------
 # Banco
 # ---------------------------------------------------------------------------
-TABELA_PROCESSOS = "processos_deposito_judicial"
+MODALIDADE = "dj"  # coluna modalidade da tabela processos
 
 # ---------------------------------------------------------------------------
 # Meses (nome do mês, para as pastas do SharePoint)

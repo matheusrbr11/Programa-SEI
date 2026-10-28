@@ -108,7 +108,7 @@ Os módulos `processar_cc/` e `processar_dj/` seguem a mesma estrutura interna (
 ```
 Processos marcados no SEI → [Etapa 1] → extrai dados + (DJ: gera Comprovante DJO) + baixa GR
                                               │
-                        tabela processos_credito_conta / processos_deposito_judicial
+                        tabela processos (modalidade 'cc' / 'dj')
                                               │
                                     [Etapa 2] → anexa, despacha, conclui
                                               │
@@ -182,12 +182,13 @@ Programa SEI/
 ├── config.example.json      # Modelo de configuração
 │
 ├── ambiente.py              # Produção/Homologação e caminhos que dependem dele
+├── migrar_tabela_processos.py  # Migração única das tabelas antigas para a tabela processos
 │
 ├── analise_comum/           # Código comum aos dois fluxos
 │   ├── main.py               #   Entry-point: lê credenciais e executa a etapa
 │   ├── core.py                #   Exceções e setup de log do subprocesso
 │   ├── log.py                 #   Logger do fluxo em execução
-│   ├── repositorio.py         #   Persistência: tabela de processos de cada fluxo no hermes.db
+│   ├── repositorio.py         #   Persistência: tabela processos (as duas modalidades) no hermes.db
 │   ├── extractors.py         #   Extração de dados dos PDFs (comprovante, ofício, alvará, mandado)
 │   ├── utils.py               #   Funções utilitárias
 │   └── config.py              #   Constantes comuns, URLs, caminhos
@@ -197,7 +198,7 @@ Programa SEI/
 │   ├── orchestrator.py       #   Casos de uso: coleta e finalização em lote
 │   ├── services.py           #   Integrações externas (BB, SIAFE, SEI)
 │   ├── extractors.py         #   Ordem de prioridade dos extratores no fluxo
-│   ├── core.py                #   Tabela de processos do fluxo (configura o repositório)
+│   ├── core.py                #   Repositório da modalidade 'cc'
 │   └── config.py              #   Constantes de negócio do fluxo
 │
 ├── processar_dj/            # Automação do Depósito Judicial
@@ -207,7 +208,7 @@ Programa SEI/
 │   ├── extractors.py         #   Ordem de prioridade dos extratores no fluxo
 │   ├── planilha.py            #   Geração da planilha de Resgate (Comprovante DJO)
 │   ├── pdf.py                  #   Conversão da planilha de Resgate para PDF
-│   ├── core.py                #   Tabela de processos do fluxo (configura o repositório)
+│   ├── core.py                #   Repositório da modalidade 'dj'
 │   └── config.py              #   Constantes de negócio do fluxo
 │
 ├── planilhas/
@@ -259,21 +260,20 @@ Clique em **RESPONDER PROCESSOS**. O programa reaproveita o login do SEI já fei
 
 ## 🗄️ Banco de Dados
 
-O programa mantém uma tabela própria de checkpoint por módulo, criada dinamicamente na primeira execução:
-
-### Tabela `processos_credito_conta`
+O programa mantém uma tabela de checkpoint, `processos`, criada dinamicamente na primeira execução. Cada processo tem uma única modalidade e, portanto, uma única linha:
 
 | Coluna | Tipo | Descrição |
 |---|---|---|
-| `processo` | TEXT | Número do processo no SEI |
-| `status` | TEXT | Situação atual (`pendente`, `dados_coletados`, `aguardando_gr`, `concluido`, `erro_coleta`) |
+| `processo` | TEXT | Número do processo no SEI (único na tabela) |
+| `modalidade` | TEXT | `cc` (Crédito em Conta) ou `dj` (Depósito Judicial) |
+| `status` | TEXT | Situação atual (`pendente`, `dados_coletados`, `aguardando_gr`, `concluido`, `erro_coleta`, `ignorado`, `revisar_despacho`, `debug`) |
 | `conta` | TEXT | Conta bancária identificada |
-|  `conta_judicial` | TEXT | Conta judicial identificada |
+| `conta_judicial` | TEXT | Conta judicial identificada |
 | `processo_judicial` | TEXT | Número do processo judicial de origem |
 | `data_pagamento` / `data_alvara` | TEXT | Datas extraídas dos documentos |
 | `ano` | INTEGER | Ano do documento/exercício |
 | `valor_pesquisa` | REAL | Valor usado na busca da GR |
-| `caminho_comprovante` / `caminho_gr` | TEXT | Caminhos locais dos arquivos baixados |
+| `caminho_comprovante` / `caminho_gr` | TEXT | Caminhos locais do Comprovante de Resgate e da Guia de Recolhimento baixados |
 | `num_doc` | TEXT | Número do documento no SIAFE |
 | `cnpj` | TEXT | CNPJ do beneficiário |
 | `tem_gr` / `tem_comprovante` / `tem_despacho_apos_gr` | INTEGER | Flags de controle da instrução |
@@ -281,31 +281,24 @@ O programa mantém uma tabela própria de checkpoint por módulo, criada dinamic
 | `data_hora_resposta` | TEXT | Horário da finalização |
 | `tempo_resposta` | REAL | Tempo de execução da Etapa 2 |
 
-### Tabela `processos_deposito_judicial`
+Colunas preenchidas só na modalidade `dj` (nulas, ou 0 nas flags, em `cc`):
 
 | Coluna | Tipo | Descrição |
 |---|---|---|
-| `processo` | TEXT | Número do processo no SEI |
-| `status` | TEXT | Situação atual (`pendente`, `dados_coletados`, `aguardando_gr`, `concluido`, `erro_coleta`) |
-| `conta` | TEXT | Conta bancária identificada |
-| `conta_judicial` | TEXT | Conta judicial identificada |
-| `processo_judicial` | TEXT | Número do processo judicial de origem |
-| `data_pagamento` / `data_alvara` | TEXT | Datas extraídas dos documentos |
-| `ano` | INTEGER | Ano do documento/exercício |
-| `valor_pesquisa` / `valor_resgate` / `valor_30` | REAL | Valores extraídos dos documentos |
-| `num_doc` | TEXT | Número do documento no SIAFE |
-| `caminho_comprovante` | TEXT | Caminho local do Comprovante de Resgate baixado |
+| `valor_resgate` / `valor_30` | REAL | Valores extraídos dos documentos |
 | `caminho_comprovante_djo` | TEXT | Caminho local do Comprovante DJO (PDF gerado a partir da planilha de Resgate) |
-| `caminho_gr` | TEXT | Caminho local da Guia de Recolhimento baixada |
-| `cnpj` | TEXT | CNPJ do beneficiário |
 | `reu` | TEXT | Réu identificado no processo judicial |
 | `titulo_documento` / `numero_documento` | TEXT | Identificação do documento de origem (ofício, alvará, mandado) |
-| `tem_comprovante` / `tem_comprovante_djo` / `tem_gr` / `tem_despacho_apos_gr` | INTEGER | Flags de controle da instrução |
-| `usuario_resposta` | TEXT | Login do usuário que finalizou o processo |
-| `data_hora_resposta` | TEXT | Horário da finalização |
-| `tempo_resposta` | REAL | Tempo de execução da Etapa 2 |
+| `tem_comprovante_djo` | INTEGER | Flag de controle da instrução |
 
-Ambas as tabelas vivem no mesmo banco (`hermes.db`), definido em `CAMINHO_HERMES`; cada módulo acessa exclusivamente a sua própria tabela.
+A tabela vive no `hermes.db`, definido em `CAMINHO_HERMES`. Cada fluxo lê e grava só os registros da sua modalidade. Um processo só aparece nos dois fluxos se foi colocado no marcador errado:
+
+- registrado na outra modalidade como `ignorado`: o fluxo atual assume o processo (o marcador foi corrigido);
+- registrado na outra modalidade com outro status: o fluxo pula o processo e avisa no log para conferir o marcador.
+
+No modo DEBUG, marque `status = 'debug'` no registro com a modalidade certa.
+
+As tabelas antigas (`processos_credito_conta` / `processos_deposito_judicial`) não são mais usadas. Para trazer os registros delas, rode `migrar_tabela_processos.py` com o Hermes e o Programa-SEI fechados e a tabela `processos` ainda vazia: sem `--aplicar` ele só mostra o que faria; com `--aplicar` faz backup do banco, migra e deixa as antigas como `*_old`, com views só de leitura no nome antigo.
 
 O checkpoint permite retomar de onde parou caso o programa seja interrompido entre as etapas — inclusive entre as sub-fases da Etapa 1.
 

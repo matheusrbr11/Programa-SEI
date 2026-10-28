@@ -29,4 +29,4 @@ TIPOS_NAO_PGE = ("Guia de Recolhimento", "Comprovante de Resgate", "Despacho")
 # ---------------------------------------------------------------------------
 # Banco
 # ---------------------------------------------------------------------------
-TABELA_PROCESSOS = "processos_credito_conta"
+MODALIDADE = "cc"  # coluna modalidade da tabela processos

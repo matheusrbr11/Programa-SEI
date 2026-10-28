@@ -24,7 +24,7 @@ from analise_comum.core import (
 )
 from .core import (
     inicializar_tabela_processos, upsert_processo,
-    buscar_processo_por_numero, buscar_processo_por_status,
+    buscar_processo_por_numero, buscar_processo_por_status, modalidade_em_conflito,
 )
 from .services import (
     mapear_estado_documentos, encontrar_dados_em_anexos, extrair_dados_comprovante_do_processo,
@@ -693,6 +693,12 @@ def etapa1_coletar(
 
         for i, processo in enumerate(lista_processos, start=1):
             if not em_modo_debug:
+                outra_modalidade = modalidade_em_conflito(processo)
+                if outra_modalidade:
+                    log.warning(f"[{i}/{total}] {processo} já está registrado como '{outra_modalidade}'; confira o marcador. Pulando.")
+                    estatisticas["ignorados"] += 1
+                    print(f"__PROGRESSO__:{i}:{total}", flush=True)
+                    continue
                 existente = buscar_processo_por_numero(processo)
                 status_existente = existente.get("status") if existente else None
                 if status_existente in ("dados_coletados", "concluido"):

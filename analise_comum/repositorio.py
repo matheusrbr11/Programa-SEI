@@ -1,5 +1,8 @@
-"""Persistência — Repository Pattern, acesso exclusivo à tabela de processos
-de cada fluxo no hermes.db. NÃO modifica outras tabelas do banco."""
+"""Persistência — Repository Pattern, acesso exclusivo à tabela ``processos``
+no hermes.db. NÃO modifica outras tabelas do banco.
+
+Cada processo tem uma única modalidade ('cc' ou 'dj'). O processo só aparece
+nos dois fluxos se alguém o colocou no marcador errado; ver ``upsert``."""
 
 from __future__ import annotations
 
@@ -8,8 +11,12 @@ from typing import Any
 import sqlite3
 
 from .config import CAMINHO_HERMES
+from .log import log
 
-# Colunas comuns aos dois fluxos (além de id, processo e status), na ordem da tabela.
+TABELA = "processos"
+STATUS_IGNORADO = "ignorado"
+
+# Colunas comuns às duas modalidades (além de id, processo, modalidade e status), na ordem da tabela.
 # Colunas "INTEGER DEFAULT 0" são flags: gravadas como 0 quando não informadas.
 COLUNAS_BASE: tuple[tuple[str, str], ...] = (
     ("conta", "TEXT"),
@@ -31,18 +38,54 @@ COLUNAS_BASE: tuple[tuple[str, str], ...] = (
     ("tempo_resposta", "REAL"),
 )
 
+# Colunas que só uma modalidade preenche; nas outras ficam nulas (ou 0, se flag)
+COLUNAS_POR_MODALIDADE: dict[str, tuple[tuple[str, str], ...]] = {
+    "cc": (),
+    "dj": (  # dados do despacho e do Comprovante DJO
+        ("valor_resgate", "REAL"),
+        ("valor_30", "REAL"),
+        ("caminho_comprovante_djo", "TEXT"),
+        ("reu", "TEXT"),
+        ("titulo_documento", "TEXT"),
+        ("numero_documento", "TEXT"),
+        ("tem_comprovante_djo", "INTEGER DEFAULT 0"),
+    ),
+}
+
+COLUNAS_TABELA = COLUNAS_BASE + tuple(c for extras in COLUNAS_POR_MODALIDADE.values() for c in extras)
+
 _TIPO_FLAG = "INTEGER DEFAULT 0"
 
 
-class Repositorio:
-    """Tabela de processos de um fluxo: ``tabela`` com as colunas base mais
-    ``colunas_extras``. ``prefixo_indice`` mantém os nomes dos índices já
-    criados no banco (ex.: 'idx_proc_cc')."""
+class ConflitoModalidade(Exception):
+    """O processo já está registrado, e ativo, na outra modalidade."""
 
-    def __init__(self, tabela: str, prefixo_indice: str, colunas_extras: tuple[tuple[str, str], ...] = ()):
-        self.tabela = tabela
-        self.prefixo_indice = prefixo_indice
-        self.colunas = COLUNAS_BASE + colunas_extras
+
+def comandos_ddl() -> list[str]:
+    """CREATE da tabela ``processos`` e do índice (usados também pela migração)."""
+    colunas_ddl = ",\n".join(f"        {nome:<25} {tipo}" for nome, tipo in COLUNAS_TABELA)
+    modalidades = ", ".join(f"'{m}'" for m in COLUNAS_POR_MODALIDADE)
+    return [
+        f"""CREATE TABLE IF NOT EXISTS {TABELA} (
+        id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+        processo                  TEXT    NOT NULL UNIQUE,
+        modalidade                TEXT    NOT NULL CHECK (modalidade IN ({modalidades})),
+        status                    TEXT    NOT NULL DEFAULT 'pendente',
+{colunas_ddl}
+    )""",
+        f"CREATE INDEX IF NOT EXISTS idx_processos_modalidade_status ON {TABELA}(modalidade, status)",
+    ]
+
+
+class Repositorio:
+    """Registros de uma modalidade na tabela ``processos``. As leituras só
+    enxergam a própria modalidade; a escrita só aceita as colunas dela."""
+
+    def __init__(self, modalidade: str):
+        if modalidade not in COLUNAS_POR_MODALIDADE:
+            raise ValueError(f"Modalidade inválida: {modalidade!r}")
+        self.modalidade = modalidade
+        self.colunas = COLUNAS_BASE + COLUNAS_POR_MODALIDADE[modalidade]
         self._nomes = tuple(nome for nome, _ in self.colunas)
         self._flags = frozenset(nome for nome, tipo in self.colunas if tipo == _TIPO_FLAG)
 
@@ -52,35 +95,37 @@ class Repositorio:
         return con
 
     def inicializar(self) -> None:
-        """Garante que a tabela e os índices existam."""
-        colunas_ddl = ",\n".join(f"        {nome:<25} {tipo}" for nome, tipo in self.colunas)
-        ddl = f"""
-    CREATE TABLE IF NOT EXISTS {self.tabela} (
-        id                        INTEGER PRIMARY KEY AUTOINCREMENT,
-        processo                  TEXT    NOT NULL,
-        status                    TEXT    NOT NULL DEFAULT 'pendente',
-{colunas_ddl}
-    );
-    CREATE INDEX IF NOT EXISTS {self.prefixo_indice}_status   ON {self.tabela}(status);
-    CREATE INDEX IF NOT EXISTS {self.prefixo_indice}_processo ON {self.tabela}(processo);
-    """
+        """Garante que a tabela e o índice existam."""
         with closing(self._conectar()) as con:
-            con.executescript(ddl)
+            for comando in comandos_ddl():
+                con.execute(comando)
             con.commit()
 
     def upsert(self, processo: str, status: str, **campos: Any) -> int:
-        """Insere ou atualiza um registro na tabela. Campos não informados (None)
-        são preservados, não sobrescritos."""
+        """Insere ou atualiza o registro do processo. Campos não informados (None)
+        são preservados, não sobrescritos.
+
+        Se o processo estiver registrado na outra modalidade: com status
+        'ignorado', esta modalidade assume o registro (marcador corrigido);
+        senão levanta ``ConflitoModalidade`` e nada é gravado."""
         desconhecidos = set(campos) - set(self._nomes)
         if desconhecidos:
-            raise TypeError(f"Colunas inexistentes em {self.tabela}: {', '.join(sorted(desconhecidos))}")
+            raise TypeError(f"Colunas inexistentes na modalidade {self.modalidade}: {', '.join(sorted(desconhecidos))}")
 
         with closing(self._conectar()) as con:
-            cur = con.execute(
-                f"SELECT id FROM {self.tabela} WHERE processo = ?",
+            row = con.execute(
+                f"SELECT id, modalidade, status FROM {TABELA} WHERE processo = ?",
                 (processo,),
-            )
-            row = cur.fetchone()
+            ).fetchone()
+
+            if row and row["modalidade"] != self.modalidade:
+                if row["status"] != STATUS_IGNORADO:
+                    raise ConflitoModalidade(
+                        f"{processo} já está registrado como '{row['modalidade']}' (status '{row['status']}')."
+                    )
+                log.info(f"{processo} estava ignorado como '{row['modalidade']}'; passa para '{self.modalidade}'.")
+                con.execute(f"DELETE FROM {TABELA} WHERE id = ?", (row["id"],))  # recomeça sem os dados da outra modalidade
+                row = None
 
             if row:
                 reg_id = row["id"]
@@ -89,36 +134,51 @@ class Repositorio:
                 if not pares:
                     return reg_id
 
-                sql = f"UPDATE {self.tabela} SET {', '.join(f'{k} = ?' for k, _ in pares)} WHERE id = ?"
+                sql = f"UPDATE {TABELA} SET {', '.join(f'{k} = ?' for k, _ in pares)} WHERE id = ?"
                 con.execute(sql, [v for _, v in pares] + [reg_id])
                 con.commit()
                 return reg_id
 
-            # INSERT: grava todas as colunas, com 0 nas flags não informadas
+            # INSERT: grava todas as colunas da modalidade, com 0 nas flags não informadas
             valores = [
                 (campos.get(nome) or 0) if nome in self._flags else campos.get(nome)
                 for nome in self._nomes
             ]
-            con.execute(
-                f"""INSERT INTO {self.tabela}
-                    (processo, status, {', '.join(self._nomes)})
-                    VALUES ({', '.join('?' * (len(self._nomes) + 2))})""",
-                [processo, status, *valores],
+            cur = con.execute(
+                f"""INSERT INTO {TABELA}
+                    (processo, modalidade, status, {', '.join(self._nomes)})
+                    VALUES ({', '.join('?' * (len(self._nomes) + 3))})""",
+                [processo, self.modalidade, status, *valores],
             )
-            con.commit()
-            return con.execute("SELECT last_insert_rowid()").fetchone()[0]
+            con.commit()  # o DELETE da troca de modalidade vai junto, na mesma transação
+            return cur.lastrowid
+
+    def modalidade_em_conflito(self, processo: str) -> str | None:
+        """A outra modalidade em que o processo está registrado e ativo (status
+        diferente de 'ignorado'), ou None. Serve para pular, antes da coleta,
+        um processo colocado no marcador errado."""
+        with closing(self._conectar()) as con:
+            row = con.execute(
+                f"SELECT modalidade FROM {TABELA} WHERE processo = ? AND modalidade != ? AND status != ?",
+                (processo, self.modalidade, STATUS_IGNORADO),
+            ).fetchone()
+            return row["modalidade"] if row else None
 
     def buscar_por_status(self, status: str) -> list[dict]:
-        """Busca todos os registros com o status informado."""
+        """Busca os registros da modalidade com o status informado."""
         with closing(self._conectar()) as con:
             cur = con.execute(
-                f"SELECT * FROM {self.tabela} WHERE status = ? ORDER BY id", (status,)
+                f"SELECT * FROM {TABELA} WHERE modalidade = ? AND status = ? ORDER BY id",
+                (self.modalidade, status),
             )
             return [dict(r) for r in cur.fetchall()]
 
     def buscar_por_numero(self, processo: str) -> dict | None:
-        """Busca o registro do processo informado."""
+        """Busca o registro do processo, se ele for desta modalidade."""
         with closing(self._conectar()) as con:
-            cur = con.execute(f"SELECT * FROM {self.tabela} WHERE processo = ?", (processo,))
+            cur = con.execute(
+                f"SELECT * FROM {TABELA} WHERE processo = ? AND modalidade = ?",
+                (processo, self.modalidade),
+            )
             row = cur.fetchone()
             return dict(row) if row else None
