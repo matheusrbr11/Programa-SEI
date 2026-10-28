@@ -37,6 +37,10 @@ CODIGO_UG_SIAFE = "999900"
 # ---------------------------------------------------------------------------
 NOME_PDF_PGE = "Documento"
 TITULO_DESPACHO = "À SUBAFIN,"
+# nomes dos documentos anexados pelo programa (procurados na árvore do processo)
+NOME_TITULO_GR = "Guia de Recolhimento"
+NOME_TITULO_COMPROVANTE_BB = "Comprovante de Resgate"
+NOME_TITULO_COMPROVANTE_DJO = "Comprovante DJO - Movimento Diário"
 
 # Modelo de despacho salvo no SEI é individual por usuário; 'bdeza' usa o
 # modelo com sufixo B, qualquer outro usuário usa o modelo com sufixo M.

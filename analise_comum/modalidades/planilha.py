@@ -1,17 +1,16 @@
-"""Geração da planilha de Resgate (modelo) a partir da planilha diária de resgates."""
+"""Depósito Judicial: geração da planilha de Resgate (modelo) a partir da planilha diária de resgates."""
 
 from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from copy import copy
-import logging
 
 import openpyxl
 from openpyxl.styles import PatternFill
 from openpyxl.worksheet.worksheet import Worksheet
 
-log = logging.getLogger("jupiter.processarDJ")
+from ..log import log
 
 ABA_MODELO = "RESGATES EM MODELO"
 ABA_DIARIA = "RESGATES A FAVOR DO GOVER"

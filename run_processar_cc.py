@@ -7,7 +7,7 @@ base = Path(__file__).resolve().parent
 if str(base) not in sys.path:
     sys.path.insert(0, str(base))
 
-from processar_cc.main import main
+from analise_comum.main import executar_modalidade
 
 if __name__ == "__main__":
-    main()
+    executar_modalidade("cc")

@@ -79,15 +79,16 @@ def comandos_ddl() -> list[str]:
 
 class Repositorio:
     """Registros de uma modalidade na tabela ``processos``. As leituras só
-    enxergam a própria modalidade; a escrita só aceita as colunas dela."""
+    enxergam a própria modalidade; a escrita só aceita as colunas dela
+    (``nomes``; ``flags`` são as colunas 'tem_*' gravadas como 0 quando ausentes)."""
 
     def __init__(self, modalidade: str):
         if modalidade not in COLUNAS_POR_MODALIDADE:
             raise ValueError(f"Modalidade inválida: {modalidade!r}")
         self.modalidade = modalidade
         self.colunas = COLUNAS_BASE + COLUNAS_POR_MODALIDADE[modalidade]
-        self._nomes = tuple(nome for nome, _ in self.colunas)
-        self._flags = frozenset(nome for nome, tipo in self.colunas if tipo == _TIPO_FLAG)
+        self.nomes = tuple(nome for nome, _ in self.colunas)
+        self.flags = frozenset(nome for nome, tipo in self.colunas if tipo == _TIPO_FLAG)
 
     def _conectar(self) -> sqlite3.Connection:
         con = sqlite3.connect(CAMINHO_HERMES)
@@ -108,7 +109,7 @@ class Repositorio:
         Se o processo estiver registrado na outra modalidade: com status
         'ignorado', esta modalidade assume o registro (marcador corrigido);
         senão levanta ``ConflitoModalidade`` e nada é gravado."""
-        desconhecidos = set(campos) - set(self._nomes)
+        desconhecidos = set(campos) - set(self.nomes)
         if desconhecidos:
             raise TypeError(f"Colunas inexistentes na modalidade {self.modalidade}: {', '.join(sorted(desconhecidos))}")
 
@@ -141,13 +142,13 @@ class Repositorio:
 
             # INSERT: grava todas as colunas da modalidade, com 0 nas flags não informadas
             valores = [
-                (campos.get(nome) or 0) if nome in self._flags else campos.get(nome)
-                for nome in self._nomes
+                (campos.get(nome) or 0) if nome in self.flags else campos.get(nome)
+                for nome in self.nomes
             ]
             cur = con.execute(
                 f"""INSERT INTO {TABELA}
-                    (processo, modalidade, status, {', '.join(self._nomes)})
-                    VALUES ({', '.join('?' * (len(self._nomes) + 3))})""",
+                    (processo, modalidade, status, {', '.join(self.nomes)})
+                    VALUES ({', '.join('?' * (len(self.nomes) + 3))})""",
                 [processo, self.modalidade, status, *valores],
             )
             con.commit()  # o DELETE da troca de modalidade vai junto, na mesma transação

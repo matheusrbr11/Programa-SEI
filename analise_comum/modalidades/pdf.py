@@ -1,14 +1,12 @@
-"""Conversão da planilha de Resgate para PDF (Comprovante DJO), via automação COM do Excel."""
+"""Depósito Judicial: conversão da planilha de Resgate para PDF (Comprovante DJO), via automação COM do Excel."""
 
 from __future__ import annotations
 
 import win32com.client as win32
 from pathlib import Path
-import logging
 
-from analise_comum.core import ErroProcesso
-
-log = logging.getLogger("jupiter.processarDJ")
+from ..core import ErroProcesso
+from ..log import log
 
 XL_TYPE_PDF = 0
 XL_LANDSCAPE = 2

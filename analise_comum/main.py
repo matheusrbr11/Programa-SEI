@@ -87,3 +87,13 @@ def executar(
             log.error("Erro ao responder processos SEI.")
             sys.exit(_codigo_saida_falha(r2))
         _sair_com_estatisticas(r2)
+
+
+def executar_modalidade(codigo: str) -> None:
+    """Entry point do subprocesso de uma modalidade ('cc' ou 'dj')."""
+    from .modalidades import obter_modalidade
+    from .orchestrator import Fluxo
+
+    modalidade = obter_modalidade(codigo)
+    fluxo = Fluxo(modalidade)
+    executar(modalidade.nome_logger, fluxo.etapa1_coletar, fluxo.etapa2_finalizar)

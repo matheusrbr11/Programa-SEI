@@ -1,4 +1,9 @@
-"""Integrações externas: Banco do Brasil, SIAFE, SharePoint e helpers de interação com o SEI."""
+"""Integrações externas comuns aos dois fluxos: Banco do Brasil, SIAFE e helpers
+de interação com o SEI.
+
+O que depende do fluxo (contas processadas, ordem dos extratores, campos a
+complementar) chega por parâmetro; os ``services.py`` de cada fluxo fixam esses
+parâmetros e acrescentam o que é só deles (despacho, SharePoint)."""
 
 from __future__ import annotations
 
@@ -6,35 +11,29 @@ from selenium.webdriver.common.print_page_options import PrintOptions
 from datetime import datetime, timedelta
 from contextlib import closing
 from num2words import num2words
-from typing import Callable
+from typing import Callable, Iterable
 from pathlib import Path
-import logging
 import sqlite3
 import base64
 import re
 
-from jupiter import Siafe, SEI, SharePoint
+from jupiter import Siafe, SEI
 import automaweb
 
-from analise_comum.config import (
+from .config import (
     URL_BB, URL_SIAFE, CAMINHO_DRIVER_EDGE, CAMINHO_HERMES, PASTA_GR,
     NOME_PDF_PGE, CNPJ_PRINCIPAL, CNPJ_ALTERNATIVO, CODIGO_UG_SIAFE,
+    NOME_TITULO_GR, NOME_TITULO_COMPROVANTE_BB, NOME_TITULO_COMPROVANTE_DJO,
 )
-from .config import (
-    CONTAS_PROCESSAR, NOME_TITULO_GR, NOME_TITULO_COMPROVANTE_BB,
-    NOME_TITULO_COMPROVANTE_DJO, CAMINHO_COOKIES_SHAREPOINT, NOMES_MESES,
-    PASTA_BASE_SHAREPOINT, PREFIXO_ARQUIVO_DIARIO, SITE_SHAREPOINT, CAMPOS_OBRIGATORIOS_DESPACHO,
-    CAMPOS_COMPLEMENTAVEIS,
-)
-from analise_comum.extractors import ExtratorComprovante, ExtratorAgendamento
-from analise_comum.core import (
+from .extractors import ExtratorComprovante, ExtratorAgendamento
+from .core import (
     ErroSEI, ErroSIAFE, ErroBB, ErroLoginSiafe, ErroExtracao, ErroValidacao,
     ErroDownload, ErroDadosNaoLocalizadosBB,
 )
-from analise_comum.utils import (
+from .log import log
+from .utils import (
     buscar_regex,
     extrair_texto_pdf,
-    formatar_moeda,
     localizar_comprovante_em_disco,
     aguardar_novo_pdf,
     mover_gr_para_destino,
@@ -42,8 +41,6 @@ from analise_comum.utils import (
     navegador_perdido,
     _registrar_arquivo_pasta_gr,
 )
-
-log = logging.getLogger("jupiter.processarDJ")
 
 # ---------------------------------------------------------------------------
 # Banco do Brasil — download de comprovantes
@@ -222,16 +219,17 @@ def baixar_comprovante_bb(dados_oficio: dict) -> Path:
             log.warning(f"Erro ao fechar driver BB: {e}")
 
 
-def consultar_conta_judicial(lista_dados: list[dict]) -> dict | None:
+def consultar_conta_judicial(lista_dados: list[dict], contas: Iterable[str]) -> dict | None:
     """
     Para cada conjunto de dados (conta judicial, CNPJ, data), tenta obter
-    o comprovante do BB (do disco ou baixando) e extrair seus dados.
+    o comprovante do BB (do disco ou baixando) e extrair seus dados. Prefere o
+    comprovante cuja conta está em ``contas`` (as processadas pelo fluxo).
     """
     extratores_resgate_bb = (ExtratorComprovante, ExtratorAgendamento)
 
     ultimo_dado_valido = None
 
-    for i, dados_oficio in enumerate(lista_dados):
+    for dados_oficio in lista_dados:
         conta_judicial = dados_oficio.get("conta_judicial")
         if not conta_judicial:
             continue
@@ -252,7 +250,7 @@ def consultar_conta_judicial(lista_dados: list[dict]) -> dict | None:
             log.warning(f"Comprovante para {conta_judicial} não contém o título esperado.")
             continue
 
-        dados = extrator.extrair(texto_comprovante, CONTAS_PROCESSAR)
+        dados = extrator.extrair(texto_comprovante, contas)
         if not dados:
             log.warning(f"Não foi possível extrair dados do comprovante de {conta_judicial}")
             continue
@@ -261,6 +259,7 @@ def consultar_conta_judicial(lista_dados: list[dict]) -> dict | None:
         dados["conta_judicial"] = conta_judicial
         dados["cnpj"] = dados_oficio.get("cnpj")
         dados["data_alvara"] = dados_oficio.get("data_alvara")
+        # dados do documento de origem (o despacho do DJ usa; o CC ignora)
         dados["reu"] = dados_oficio.get("reu")
         dados["titulo_documento"] = dados_oficio.get("titulo_documento")
         dados["numero_documento"] = dados_oficio.get("numero_documento") or dados.get("numero_documento")
@@ -268,7 +267,7 @@ def consultar_conta_judicial(lista_dados: list[dict]) -> dict | None:
         if not dados["titulo_documento"] and dados["numero_documento"] and dados["numero_documento"].upper().endswith("OF"):
             dados["titulo_documento"] = "Ofício"
 
-        if dados.get("conta") in CONTAS_PROCESSAR:
+        if dados.get("conta") in contas:
             return dados
 
         ultimo_dado_valido = dados
@@ -421,21 +420,30 @@ def _extrair_reu_avulso(texto: str) -> str | None:
     return reu.strip() if reu else None
 
 
-def encontrar_dados_em_anexos(sei: SEI, candidatos: list[str]) -> dict | None:
-    """Itera pelos candidatos até encontrar dados do comprovante.
+def encontrar_dados_em_anexos(
+    sei: SEI,
+    candidatos: list[str],
+    extrair_dados: Callable[[str], dict | None],
+    contas: Iterable[str],
+    campos_complementaveis: Iterable[str] = (),
+) -> dict | None:
+    """Itera pelos candidatos até encontrar dados do comprovante, extraídos com
+    ``extrair_dados`` (a ordem de extratores do fluxo).
 
-    Depois de encontrar o documento com a conta de processamento, continua
-    percorrendo os demais anexos para complementar campos que porventura
-    não estejam nesse documento (ex.: réu/título/número quando essas
+    Depois de encontrar o documento com uma conta de ``contas``, continua
+    percorrendo os demais anexos só enquanto faltar algum dos
+    ``campos_complementaveis`` (ex.: réu/título/número quando essas
     informações estão espalhadas em anexos diferentes do processo, como uma
-    CDA separada do Ofício/Alvará)."""
-    from .extractors import extrair_dados_documento
-
+    CDA separada do Ofício/Alvará). Sem campos a complementar, para no
+    primeiro documento com a conta."""
     prioritarios = [n for n in candidatos if NOME_PDF_PGE in n]
     restantes = [n for n in candidatos if NOME_PDF_PGE not in n]
     dado_alternativo = None
     dado_principal = None
     reu_avulso_encontrado = None
+
+    def faltantes() -> list[str]:
+        return [c for c in campos_complementaveis if not dado_principal.get(c)]
 
     for nome_doc in prioritarios + restantes:
         log.info(f"Buscando dados em: '{nome_doc}'...")
@@ -447,7 +455,7 @@ def encontrar_dados_em_anexos(sei: SEI, candidatos: list[str]) -> dict | None:
             log.warning(f"  [{nome_doc}] Pulando ({mensagem_curta(e)}).")
             continue
 
-        dados = extrair_dados_documento(texto_pdf)
+        dados = extrair_dados(texto_pdf)
         if not dados:
             reu_avulso = _extrair_reu_avulso(texto_pdf)
             if reu_avulso:
@@ -459,20 +467,21 @@ def encontrar_dados_em_anexos(sei: SEI, candidatos: list[str]) -> dict | None:
                 log.warning(f"  [{nome_doc}] Nenhum dado reconhecido.")
             continue
 
-        if dado_principal is None and dados.get("conta") in CONTAS_PROCESSAR:
+        if dado_principal is None and dados.get("conta") in contas:
             log.info(f"  [{nome_doc}] Dados encontrados.")
             dado_principal = dados
             if not dado_principal.get("reu") and reu_avulso_encontrado:
                 dado_principal["reu"] = reu_avulso_encontrado
+            if not faltantes():
+                break
             continue
 
         if dado_principal is not None:
-            faltantes = [c for c in CAMPOS_COMPLEMENTAVEIS if not dado_principal.get(c)]
-            if not faltantes:
-                break
-            for campo in faltantes:
+            for campo in faltantes():
                 if dados.get(campo):
                     dado_principal[campo] = dados[campo]
+            if not faltantes():
+                break
             continue
 
         dado_alternativo = dados
@@ -483,87 +492,19 @@ def encontrar_dados_em_anexos(sei: SEI, candidatos: list[str]) -> dict | None:
     return dado_principal or dado_alternativo
 
 
-def extrair_dados_comprovante_do_processo(sei: SEI, nome_comprovante: str) -> dict | None:
+def extrair_dados_comprovante_do_processo(sei: SEI, nome_comprovante: str, contas: Iterable[str]) -> dict | None:
     """Quando o comprovante já existe no processo, extrai diretamente."""
     log.info(f"Comprovante ja presente no processo ('{nome_comprovante}'). Extraindo...")
     texto_pdf = baixar_e_extrair_texto(sei, nome_comprovante)
-    return ExtratorComprovante.extrair(texto_pdf, CONTAS_PROCESSAR)
+    return ExtratorComprovante.extrair(texto_pdf, contas)
 
 
-def _valor_por_extenso(valor_float: float) -> str:
+def valor_por_extenso(valor_float: float) -> str:
     try:
         valor_por_extenso = num2words(valor_float, lang="pt_BR", to="currency")
         return valor_por_extenso.replace("catorze", "quatorze")
     except Exception:
         return "valor por extenso não calculado"
-
-
-def validar_valores_despacho_dj(registro: dict) -> tuple[float, float]:
-    """Valida e converte 'valor_resgate'/'valor_30' do registro para float.
-
-    Deve ser chamada antes de ``sei.incluir_despacho`` para evitar criar o
-    documento no SEI quando os valores são inválidos/ausentes."""
-    try:
-        valor_resgate_float = float(registro["valor_resgate"])
-        valor_30_float = float(registro["valor_30"])
-    except (ValueError, TypeError, KeyError) as e:
-        raise ErroValidacao("Valor inválido para formatação do despacho.") from e
-    return valor_resgate_float, valor_30_float
-
-
-def formatar_despacho_dj_inserido(
-    sei: SEI, registro: dict, titulo: str, lista_nomes: list[str],
-    valor_resgate_float: float, valor_30_float: float,
-) -> bool:
-    """Formata o despacho de Depósito Judicial no SEI, com valores por extenso
-    e os index dos documentos do processo.
-
-    Retorna False quando algum campo obrigatório do despacho não estava
-    disponível no banco de dados, indicando que o despacho foi
-    incluído apenas parcialmente e precisa de complementação manual.
-
-    Lança ``ErroSEI`` quando o SEI não confirma a formatação (despacho não
-    salvo, placeholder não substituído ou link não aplicado)."""
-    despacho_completo = all(registro.get(campo) for campo in CAMPOS_OBRIGATORIOS_DESPACHO)
-
-    nome_despacho_encaminhamento = next(
-        (n for n in lista_nomes if "Despacho de Encaminhamento de Processo" in n), None
-    )
-    index_despacho = buscar_regex(nome_despacho_encaminhamento, r"(\d+)") if nome_despacho_encaminhamento else None
-    index_comprovante = sei.obter_numero_documento(NOME_TITULO_COMPROVANTE_BB)
-    index_comprovante_djo = sei.obter_numero_documento(NOME_TITULO_COMPROVANTE_DJO)
-    index_gr = sei.obter_numero_documento(NOME_TITULO_GR)
-
-    mapa_texto = {
-        "@tratamento_destinatario@ @cargo_destinatario@,": titulo,
-        "[index_despacho]": index_despacho or "—",
-        "[titulo_documento]": registro.get("titulo_documento") or "—",
-        "[numero_documento]": registro.get("numero_documento") or "—",
-        "[processo_judicial]": registro.get("processo_judicial") or "—",
-        "[reu]": registro.get("reu") or "—",
-        "[index_comprovante_DJO]": index_comprovante_djo or "—",
-        "[data]": registro.get("data_pagamento") or "—",
-        "[conta_judicial]": registro.get("conta_judicial") or "—",
-        "[valor_resgate]": formatar_moeda(valor_resgate_float),
-        "[valor_resgate_por_extenso]": _valor_por_extenso(valor_resgate_float),
-        "[index_comprovante]": index_comprovante or "—",
-        "[valor_30]": formatar_moeda(valor_30_float),
-        "[valor_30_por_extenso]": _valor_por_extenso(valor_30_float),
-        "[data_pagamento]": registro.get("data_pagamento") or "—",
-        "[num_doc]": registro.get("num_doc") or "—",
-        "[index_gr]": index_gr or "—",
-    }
-    # lista (não dict) porque [index_comprovante] aparece 2x no texto padrão do
-    # despacho — cada entrada vira uma ocorrência distinta a ser transformada em link
-    mapa_links = [
-        (v, v) for v in (
-            index_despacho, index_comprovante, index_comprovante, index_comprovante_djo, index_gr,
-        ) if v
-    ]
-
-    if not sei.formatar_despacho(mapa_texto, mapa_links):
-        raise ErroSEI("Formatação do despacho não confirmada pelo SEI.")
-    return despacho_completo
 
 
 def mapear_estado_documentos(sei: SEI, processo: str) -> dict:
@@ -622,46 +563,3 @@ def mapear_estado_documentos(sei: SEI, processo: str) -> dict:
         }
     except Exception as e:
         raise ErroSEI(f"Erro ao mapear documentos da árvore: {e}") from e
-
-
-# ---------------------------------------------------------------------------
-# SharePoint — planilha diária de resgates
-# ---------------------------------------------------------------------------
-def _nome_arquivo_diario(data: datetime) -> str:
-    """Monta o nome do arquivo da planilha diária para a data informada."""
-    return f"{PREFIXO_ARQUIVO_DIARIO} {data.strftime('%d_%m_%Y')}.xlsx"
-
-
-def _caminho_sharepoint_diario(data: datetime) -> str:
-    """.../Arquivos DJO Banco do Brasil/[Ano]/[MM - Mês]/Resgates a Favor do Governo/<arquivo>"""
-    pasta_mes = f"{data.month:02d} - {NOMES_MESES[data.month]}"
-    return (
-        f"{PASTA_BASE_SHAREPOINT}/{data.year}/{pasta_mes}"
-        f"/Resgates a Favor do Governo/{_nome_arquivo_diario(data)}"
-    )
-
-
-def baixar_planilha_diaria(data_pagamento: str, pasta_destino: Path) -> Path:
-    """Localiza e baixa, do SharePoint, a planilha diária correspondente
-    à Data do Pagamento do Comprovante de Resgate (formato DD/MM/AAAA).
-    """
-    data = datetime.strptime(data_pagamento, "%d/%m/%Y")
-    nome_arquivo = _nome_arquivo_diario(data)
-    caminho_sharepoint = _caminho_sharepoint_diario(data)
-
-    sp = SharePoint(SITE_SHAREPOINT, caminho_cookie=CAMINHO_COOKIES_SHAREPOINT)
-
-    if not sp.existe_arquivo(caminho_sharepoint):
-        raise ErroDownload(
-            f"Planilha diária não encontrada no SharePoint para {data_pagamento} "
-            f"(esperado: '{nome_arquivo}')."
-        )
-
-    sp.download_arquivo(caminho_sharepoint, pasta_local=str(pasta_destino))
-
-    caminho_local = pasta_destino / nome_arquivo
-    if not caminho_local.exists():
-        raise ErroDownload(f"Download de '{nome_arquivo}' não gerou o arquivo esperado em {pasta_destino}.")
-
-    log.info(f"Planilha diária baixada: {nome_arquivo}")
-    return caminho_local

@@ -38,7 +38,7 @@ O sistema elimina a necessidade de localizar manualmente comprovantes de resgate
 - No módulo de Depósito Judicial, geração do Comprovante DJO (planilha de Resgate convertida em PDF) a partir do movimento diário do Banco do Brasil
 - Inclusão do despacho padrão e conclusão do processo no SEI
 
-Os dois módulos — **Crédito em Conta** e **Depósito Judicial** — seguem o mesmo fluxo de duas etapas (coleta e finalização), com marcadores, tabelas de checkpoint e regras de negócio próprias, mas compartilham a mesma interface, arquitetura e biblioteca de automação SEI/SIAFE.
+Os dois módulos — **Crédito em Conta** e **Depósito Judicial** — seguem o mesmo fluxo de duas etapas (coleta e finalização), com marcadores e regras de negócio próprias, mas compartilham o mesmo código de fluxo, a mesma tabela de checkpoint, a mesma interface e a mesma biblioteca de automação SEI/SIAFE.
 
 ---
 
@@ -90,8 +90,8 @@ Os dois módulos — **Crédito em Conta** e **Depósito Judicial** — seguem o
 │           │                                               │
 │           ▼                                               │
 │  ┌─────────────────────────────────────────────────────┐  │
-│  │           processar_cc/       processar_dj/         │  │
-│  │  extractors.py → services.py → orchestrator.py      │  │
+│  │   analise_comum/orchestrator.py (fluxo único)       │  │
+│  │   + modalidades/cc.py · modalidades/dj.py           │  │
 │  └────────┬────────────────────────────────────────────┘  │
 │           │                                               │
 │           ▼                                               │
@@ -101,7 +101,9 @@ Os dois módulos — **Crédito em Conta** e **Depósito Judicial** — seguem o
 └───────────────────────────────────────────────────────────┘
 ```
 
-Os módulos `processar_cc/` e `processar_dj/` seguem a mesma estrutura interna (cada um com seu próprio `orchestrator.py`, `services.py`, `extractors.py`, `core.py` e `config.py`) e são acionados pela mesma interface (`main.py`), cada um via seu próprio subprocesso (`run_processar_cc.py` / `run_processar_dj.py`). O que é idêntico nos dois fluxos (utilitários, exceções, setup de log, entry-point e constantes comuns) fica em `analise_comum/`.
+Crédito em Conta e Depósito Judicial são duas **modalidades** do mesmo fluxo. O fluxo (`analise_comum/orchestrator.py`) é um só; cada modalidade (`analise_comum/modalidades/cc.py` e `dj.py`) define seus marcadores, contas, texto padrão do despacho, ordem dos extratores e os pontos em que difere: de onde vem o valor da GR, os documentos que gera (no DJ, o Comprovante DJO) e como monta o despacho. A interface (`main.py`) aciona cada modalidade no seu próprio subprocesso (`run_processar_cc.py` / `run_processar_dj.py`).
+
+Para incluir uma modalidade nova: crie `analise_comum/modalidades/<codigo>.py` com uma subclasse de `Modalidade`, registre-a em `MODALIDADES` (`modalidades/__init__.py`), inclua as colunas próprias em `COLUNAS_POR_MODALIDADE` (`repositorio.py`) e um `run_processar_<codigo>.py`.
 
 **Fluxo de dados:**
 
@@ -177,39 +179,29 @@ Programa SEI/
 │
 ├── exe.py                   # Ponto de entrada (usado pelo atalho .exe)
 ├── main.py                  # Aplicação principal + GUI (SeiApp)
-├── run_processar_cc.py      # Entry-point do subprocesso de Crédito em Conta
-├── run_processar_dj.py      # Entry-point do subprocesso de Depósito Judicial
+├── run_processar_cc.py      # Subprocesso da modalidade Crédito em Conta
+├── run_processar_dj.py      # Subprocesso da modalidade Depósito Judicial
 ├── config.example.json      # Modelo de configuração
 │
 ├── ambiente.py              # Produção/Homologação e caminhos que dependem dele
 ├── migrar_tabela_processos.py  # Migração única das tabelas antigas para a tabela processos
 │
-├── analise_comum/           # Código comum aos dois fluxos
-│   ├── main.py               #   Entry-point: lê credenciais e executa a etapa
+├── analise_comum/           # Todo o código dos fluxos
+│   ├── main.py               #   Entry-point: lê credenciais e executa a etapa da modalidade
+│   ├── orchestrator.py       #   Fluxo único: coleta (Etapa 1), GR em lote no SIAFE e finalização (Etapa 2)
+│   ├── services.py            #   Integrações: BB, contabilizações, SIAFE e helpers do SEI
+│   ├── repositorio.py         #   Persistência: tabela processos (todas as modalidades) no hermes.db
+│   ├── extractors.py         #   Extração de dados dos PDFs (comprovante, ofício, alvará, mandado)
 │   ├── core.py                #   Exceções e setup de log do subprocesso
 │   ├── log.py                 #   Logger do fluxo em execução
-│   ├── repositorio.py         #   Persistência: tabela processos (as duas modalidades) no hermes.db
-│   ├── extractors.py         #   Extração de dados dos PDFs (comprovante, ofício, alvará, mandado)
 │   ├── utils.py               #   Funções utilitárias
-│   └── config.py              #   Constantes comuns, URLs, caminhos
-│
-├── processar_cc/            # Automação do Crédito em Conta
-│   ├── main.py               #   Entry-point do subprocesso
-│   ├── orchestrator.py       #   Casos de uso: coleta e finalização em lote
-│   ├── services.py           #   Integrações externas (BB, SIAFE, SEI)
-│   ├── extractors.py         #   Ordem de prioridade dos extratores no fluxo
-│   ├── core.py                #   Repositório da modalidade 'cc'
-│   └── config.py              #   Constantes de negócio do fluxo
-│
-├── processar_dj/            # Automação do Depósito Judicial
-│   ├── main.py               #   Entry-point do subprocesso
-│   ├── orchestrator.py       #   Casos de uso: coleta e finalização em lote
-│   ├── services.py           #   Integrações externas (BB, SIAFE, SEI, SharePoint)
-│   ├── extractors.py         #   Ordem de prioridade dos extratores no fluxo
-│   ├── planilha.py            #   Geração da planilha de Resgate (Comprovante DJO)
-│   ├── pdf.py                  #   Conversão da planilha de Resgate para PDF
-│   ├── core.py                #   Repositório da modalidade 'dj'
-│   └── config.py              #   Constantes de negócio do fluxo
+│   ├── config.py              #   Constantes comuns, URLs, caminhos
+│   └── modalidades/          #   O que muda entre as modalidades
+│       ├── __init__.py        #     Classe base Modalidade e registro das modalidades
+│       ├── cc.py              #     Crédito em Conta: configuração, extratores e despacho
+│       ├── dj.py              #     Depósito Judicial: configuração, extratores, despacho, Comprovante DJO e SharePoint
+│       ├── planilha.py        #     DJ: geração da planilha de Resgate
+│       └── pdf.py             #     DJ: conversão da planilha de Resgate para PDF
 │
 ├── planilhas/
 │   ├── Resgate Modelo.xlsx                   # Template usado na geração da planilha de Resgate (Comprovante DJO)
