@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import NoReturn
+from typing import Callable, NoReturn, Optional
 import time
 
 from jupiter import SEI, Siafe
@@ -34,6 +34,16 @@ from .utils import (
 
 # despacho incluído sem formatação confirmada: fora das Etapas 1 e 2 até revisão manual
 STATUS_REVISAR_DESPACHO = "revisar_despacho"
+
+# versaoSiafe da jupiter -> nome exibido no pedido de senha
+NOMES_SIAFE = {1: "SIAFE-Rio 2", 2: "SIAFE-Rio 2 (beta)", 3: "SIAFE-Rio 2 (homologação)", 4: "SIAFE-Rio 1"}
+
+
+def nome_siafe(versao_siafe: int) -> str:
+    return NOMES_SIAFE.get(versao_siafe, f"SIAFE (versão {versao_siafe})")
+
+# (versao, nome, erro da tentativa anterior) -> (usuario, senha), ou None se o login foi cancelado
+PedirCredenciaisSiafe = Callable[[int, str, Optional[str]], Optional[tuple[str, str]]]
 
 
 def determinar_versao_siafe(ano: int) -> tuple[int, str]:
@@ -389,13 +399,31 @@ class Fluxo:
             grupos[chave] = sorted(registros, key=lambda r: r.get("num_doc") is None)
         return grupos
 
-    def _baixar_gr_pendentes_em_lote(self, siafe_usuario: str, siafe_senha: str, estatisticas: dict) -> dict | None:
+    @staticmethod
+    def _logar_siafe(siafe: Siafe, versao_siafe: int, ano_doc: str, pedir_credenciais: PedirCredenciaisSiafe) -> bool:
+        """Entra no SIAFE com as credenciais da versão, pedindo de novo enquanto
+        o login for recusado. False se o usuário cancelar o pedido."""
+        nome = nome_siafe(versao_siafe)
+        erro = None
+        while True:
+            credenciais = pedir_credenciais(versao_siafe, nome, erro)
+            if credenciais is None:
+                return False
+            try:
+                abrir_sessao_siafe(siafe, versao_siafe, *credenciais, ano_doc)
+                return True
+            except ErroLoginSiafe:
+                log.warning(f"[ETAPA 1] Login recusado no {nome}; pedindo usuário e senha de novo.")
+                erro = "Login recusado pelo SIAFE. Confira usuário e senha."
+
+    def _baixar_gr_pendentes_em_lote(self, pedir_credenciais: PedirCredenciaisSiafe, estatisticas: dict) -> dict | None:
         """
         Resolve todos os processos 'aguardando_gr' abrindo uma sessão do SIAFE
-        por grupo (versao_siafe, ano_doc).
+        por grupo (versao_siafe, ano_doc). As credenciais de cada versão são
+        pedidas só aqui, quando há GR a buscar naquela versão.
 
         Retorna um dict de falha se o lote deve ser interrompido
-        (falha de login ou navegador perdido), ou None se terminou
+        (login cancelado ou navegador perdido), ou None se terminou
         com sucesso ou erros pontuais por processo, que nao interrompem.
         """
         pendentes = self.repo.buscar_por_status("aguardando_gr")
@@ -404,6 +432,13 @@ class Fluxo:
 
         grupos = self._agrupar_pendentes_gr(pendentes)
         log.info(f"[ETAPA 1] {len(pendentes)} GR(s) pendente(s) em {len(grupos)} sessão(oes) SIAFE")
+
+        # pede as credenciais de cada versão antes de abrir o navegador, que ficaria
+        # na frente da tela de login (uma senha recusada é pedida de novo depois, no login)
+        for versao_siafe in dict.fromkeys(versao for versao, _ in grupos):
+            if pedir_credenciais(versao_siafe, nome_siafe(versao_siafe), None) is None:
+                log.warning(f"[ETAPA 1] Login no SIAFE cancelado; {estatisticas['aguardando_gr']} GR(s) continuam pendentes.")
+                return {"sucesso": False, "motivo": "login_siafe_cancelado", "estatisticas": estatisticas}
 
         siafe = Siafe()
         total = estatisticas["total"]
@@ -419,11 +454,9 @@ class Fluxo:
                 try:
                     if idx_grupo > 0:
                         siafe.clicar(SAIR_SIAFE)
-                    abrir_sessao_siafe(siafe, versao_siafe, siafe_usuario, siafe_senha, ano_doc)
-
-                except ErroLoginSiafe:
-                    log.error("[ETAPA 1] Falha de login no SIAFE, interrompendo lote.")
-                    return {"sucesso": False, "motivo": "falha_login_siafe", "estatisticas": estatisticas}
+                    if not self._logar_siafe(siafe, versao_siafe, ano_doc, pedir_credenciais):
+                        log.warning(f"[ETAPA 1] Login no SIAFE cancelado; {estatisticas['aguardando_gr']} GR(s) continuam pendentes.")
+                        return {"sucesso": False, "motivo": "login_siafe_cancelado", "estatisticas": estatisticas}
                 except Exception as e:
                     log.error(f"[ETAPA 1] Erro ao abrir sessao SIAFE do grupo: {mensagem_curta(e)}", exc_info=True)
                     return {"sucesso": False, "motivo": "navegador_perdido", "estatisticas": estatisticas}
@@ -498,8 +531,7 @@ class Fluxo:
         self,
         sei_user: str,
         sei_pass: str,
-        siafe_user: str,
-        siafe_pass: str,
+        pedir_credenciais_siafe: PedirCredenciaisSiafe,
         orgao_sei: str = ORGAO_SEI_PADRAO,
         marcador_filtro: str | None = None,
     ) -> dict:
@@ -509,7 +541,8 @@ class Fluxo:
              quando necessario) e prepara os documentos da modalidade para cada
              processo do marcador. GRs não encontradas localmente ficam com
              status 'aguardando_gr'.
-          B. Baixa as GRs pendentes em lote no SIAFE.
+          B. Baixa as GRs pendentes em lote no SIAFE, pedindo as credenciais
+             de cada versão do SIAFE só quando houver GR a buscar nela.
         """
         marcador_filtro = marcador_filtro or self.modalidade.marcador_filtro
         self.repo.inicializar()
@@ -606,7 +639,7 @@ class Fluxo:
                 sei.fechar_driver()
             except Exception as e:
                 log.debug(f"[ETAPA 1] Driver ja indisponivel ao fechar: {e}")
-        falha_siafe = self._baixar_gr_pendentes_em_lote(siafe_user, siafe_pass, estatisticas)
+        falha_siafe = self._baixar_gr_pendentes_em_lote(pedir_credenciais_siafe, estatisticas)
         if falha_siafe:
             return falha_siafe
 
