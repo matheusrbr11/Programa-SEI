@@ -6,7 +6,7 @@ Lido pela interface (main.py) e pelo analise_comum.
 from pathlib import Path
 
 # Mesma numeração de versaoSei/versaoSiafe da jupiter: 1=Produção, 3=Homologação.
-VERSAO_SEI = 3
+VERSAO_SEI = 1
 HOMOLOGACAO = VERSAO_SEI == 3
 NOME_AMBIENTE = "Homologação" if HOMOLOGACAO else "Produção"
 
