@@ -12,6 +12,7 @@ import sqlite3
 
 from .config import CAMINHO_HERMES
 from .log import log
+from .pendencias import CATEGORIA_POR_STATUS
 
 TABELA = "processos"
 STATUS_IGNORADO = "ignorado"
@@ -36,6 +37,7 @@ COLUNAS_BASE: tuple[tuple[str, str], ...] = (
     ("usuario_resposta", "TEXT"),
     ("data_hora_resposta", "TEXT"),
     ("tempo_resposta", "REAL"),
+    ("motivo_pendencia", "TEXT"),
 )
 
 # Colunas que só uma modalidade preenche; nas outras ficam nulas (ou 0, se flag)
@@ -96,15 +98,25 @@ class Repositorio:
         return con
 
     def inicializar(self) -> None:
-        """Garante que a tabela e o índice existam."""
+        """Garante que a tabela, o índice e as colunas existam (a tabela pode
+        ter sido criada por uma versão anterior do programa)."""
         with closing(self._conectar()) as con:
             for comando in comandos_ddl():
                 con.execute(comando)
+            existentes = {r["name"] for r in con.execute(f"PRAGMA table_info({TABELA})")}
+            for nome, tipo in COLUNAS_TABELA:
+                if nome not in existentes:
+                    try:
+                        con.execute(f"ALTER TABLE {TABELA} ADD COLUMN {nome} {tipo}")
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column" not in str(e):  # outra máquina acabou de incluir
+                            raise
             con.commit()
 
     def upsert(self, processo: str, status: str, **campos: Any) -> int:
         """Insere ou atualiza o registro do processo. Campos não informados (None)
-        são preservados, não sobrescritos.
+        são preservados, não sobrescritos; a exceção é ``motivo_pendencia``, que
+        descreve a situação atual e é apagado por qualquer gravação sem ele.
 
         Se o processo estiver registrado na outra modalidade: com status
         'ignorado', esta modalidade assume o registro (marcador corrigido);
@@ -131,9 +143,8 @@ class Repositorio:
             if row:
                 reg_id = row["id"]
                 atualizar = {"status": status, **campos}
-                pares = [(k, v) for k, v in atualizar.items() if v is not None]
-                if not pares:
-                    return reg_id
+                pares = [(k, v) for k, v in atualizar.items() if v is not None and k != "motivo_pendencia"]
+                pares.append(("motivo_pendencia", campos.get("motivo_pendencia")))
 
                 sql = f"UPDATE {TABELA} SET {', '.join(f'{k} = ?' for k, _ in pares)} WHERE id = ?"
                 con.execute(sql, [v for _, v in pares] + [reg_id])
@@ -153,6 +164,35 @@ class Repositorio:
             )
             con.commit()  # o DELETE da troca de modalidade vai junto, na mesma transação
             return cur.lastrowid
+
+    def registrar_motivo(self, processo: str, motivo: str) -> None:
+        """Grava o motivo da pendência sem mudar o status do processo."""
+        with closing(self._conectar()) as con:
+            con.execute(
+                f"UPDATE {TABELA} SET motivo_pendencia = ? WHERE processo = ? AND modalidade = ?",
+                (motivo, processo, self.modalidade),
+            )
+            con.commit()
+
+    def listar_pendencias(self) -> list[dict]:
+        """Pendências abertas da modalidade: ``{"processo", "categoria", "motivo"}``."""
+        marcas = ", ".join("?" * len(CATEGORIA_POR_STATUS))
+        with closing(self._conectar()) as con:
+            cur = con.execute(
+                f"""SELECT processo, status, motivo_pendencia FROM {TABELA}
+                    WHERE modalidade = ? AND (status IN ({marcas})
+                        OR (status = 'dados_coletados' AND motivo_pendencia IS NOT NULL))
+                    ORDER BY id""",
+                (self.modalidade, *CATEGORIA_POR_STATUS),
+            )
+            return [
+                {
+                    "processo": r["processo"],
+                    "categoria": CATEGORIA_POR_STATUS.get(r["status"], "finalizacao"),
+                    "motivo": r["motivo_pendencia"],
+                }
+                for r in cur.fetchall()
+            ]
 
     def modalidade_em_conflito(self, processo: str) -> str | None:
         """A outra modalidade em que o processo está registrado e ativo (status

@@ -39,6 +39,7 @@ class CreditoEmConta(Modalidade):
         "ano": "Campo 'Ano' nao encontrado.",
         "valor_pesquisa": "Campo 'Valor' nao encontrado.",
     }
+    gr_filtra_por_data = True
 
     def extrair_dados_documento(self, texto: str) -> dict | None:
         """Ordem de prioridade: Comprovante -> Agendamento -> Oficio -> Alvara -> Mandado."""

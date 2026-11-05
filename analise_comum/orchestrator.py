@@ -17,7 +17,7 @@ from .config import (
     VERSAO_SIAFE_RIO_2, VERSAO_SIAFE_RIO_1,
 )
 from .core import (
-    ErroProcesso, ErroExtracao, ErroValidacao, ErroDownload, ErroSEI,
+    ErroProcesso, ErroExtracao, ErroValidacao, ErroDownload, ErroSEI, ErroRevisarDespacho,
     ErroLoginSEI, ErroLoginSiafe,
 )
 from .log import log
@@ -28,7 +28,7 @@ from .services import (
     baixar_gr_siafe_por_valor, abrir_sessao_siafe,
 )
 from .utils import (
-    localizar_gr_em_disco, mensagem_curta, navegador_perdido,
+    formatar_moeda, localizar_gr_em_disco, mensagem_curta, navegador_perdido,
     sessao_siafe_viva, sessao_sei_viva,
 )
 
@@ -217,7 +217,7 @@ class Fluxo:
         Depois de revisar o despacho no SEI, conclua o processo manualmente ou
         volte o status para 'dados_coletados' para o programa finalizá-lo."""
         self.repo.upsert(processo=processo, status=STATUS_REVISAR_DESPACHO)
-        raise ErroSEI(
+        raise ErroRevisarDespacho(
             f"Despacho incluído, mas a formatação não foi confirmada ({mensagem_curta(erro)}). "
             f"Processo retirado do fluxo automático: revise o despacho no SEI."
         ) from erro
@@ -352,6 +352,19 @@ class Fluxo:
     # -----------------------------------------------------------------------
     # Orquestração pública em lote
     # -----------------------------------------------------------------------
+    def _registrar_pendencia(
+        self, processo: str, categoria: str, motivo: str | None, estatisticas: dict, gravar: bool = True,
+    ) -> None:
+        """Inclui o processo no resumo da execução e grava o motivo no banco, para
+        a tela de pendências. ``gravar=False`` quando o registro no banco não
+        é desta modalidade, já tem o motivo ou não fica pendente pelo status."""
+        estatisticas["pendencias"].append({"processo": processo, "categoria": categoria, "motivo": motivo})
+        if gravar:
+            try:
+                self.repo.registrar_motivo(processo, motivo)
+            except Exception as e:
+                log.error(f"{processo} erro ao gravar o motivo da pendência: {e}", exc_info=True)
+
     def _persistir_resultado_coleta(self, processo: str, payload: dict, estatisticas: dict) -> None:
         """Grava resultado da coleta e atualiza estatísticas do lote."""
         status = payload.get("status")
@@ -379,6 +392,7 @@ class Fluxo:
             log.error(f"{processo} erro ao gravar status de erro: {e}", exc_info=True)
         estatisticas["erros"] += 1
         estatisticas["erros_detalhe"].append({"processo": processo, "erro": str(erro)})
+        self._registrar_pendencia(processo, "coleta", mensagem_curta(erro), estatisticas)
 
     # -----------------------------------------------------------------------
     # Etapa 1 (sub-fase B) — Download de GR em lote, agrupado por sessão SIAFE
@@ -418,9 +432,9 @@ class Fluxo:
 
     def _baixar_gr_pendentes_em_lote(self, pedir_credenciais: PedirCredenciaisSiafe, estatisticas: dict) -> dict | None:
         """
-        Resolve todos os processos 'aguardando_gr' abrindo uma sessão do SIAFE
-        por grupo (versao_siafe, ano_doc). As credenciais de cada versão são
-        pedidas só aqui, quando há GR a buscar naquela versão.
+        Resolve todos os processos 'aguardando_gr', uma versão do SIAFE por vez e
+        o SIAFE-Rio 2 primeiro. As credenciais de cada versão são pedidas só quando
+        chega a vez dela, depois de terminada a anterior.
 
         Retorna um dict de falha se o lote deve ser interrompido
         (login cancelado ou navegador perdido), ou None se terminou
@@ -433,20 +447,40 @@ class Fluxo:
         grupos = self._agrupar_pendentes_gr(pendentes)
         log.info(f"[ETAPA 1] {len(pendentes)} GR(s) pendente(s) em {len(grupos)} sessão(oes) SIAFE")
 
-        # pede as credenciais de cada versão antes de abrir o navegador, que ficaria
-        # na frente da tela de login (uma senha recusada é pedida de novo depois, no login)
-        for versao_siafe in dict.fromkeys(versao for versao, _ in grupos):
+        progresso_base = estatisticas["total"] - len(pendentes)
+        versoes = dict.fromkeys(versao for versao, _ in grupos)
+        for versao_siafe in sorted(versoes, key=lambda versao: versao != VERSAO_SIAFE_RIO_2):
+            grupos_versao = {ano_doc: registros for (versao, ano_doc), registros in grupos.items() if versao == versao_siafe}
+
+            # pede as credenciais com o navegador fechado, para ele não ficar na frente da
+            # tela de login (uma senha recusada é pedida de novo depois, no login)
             if pedir_credenciais(versao_siafe, nome_siafe(versao_siafe), None) is None:
                 log.warning(f"[ETAPA 1] Login no SIAFE cancelado; {estatisticas['aguardando_gr']} GR(s) continuam pendentes.")
                 return {"sucesso": False, "motivo": "login_siafe_cancelado", "estatisticas": estatisticas}
 
+            falha = self._baixar_gr_da_versao(versao_siafe, grupos_versao, pedir_credenciais, estatisticas, progresso_base)
+            if falha:
+                return falha
+            progresso_base += sum(len(registros) for registros in grupos_versao.values())
+
+        return None
+
+    def _baixar_gr_da_versao(
+        self,
+        versao_siafe: int,
+        grupos: dict[str, list[dict]],
+        pedir_credenciais: PedirCredenciaisSiafe,
+        estatisticas: dict,
+        progresso_base: int,
+    ) -> dict | None:
+        """Busca as GRs de uma versão do SIAFE num navegador próprio, com uma sessão
+        por ano do documento. Retorna um dict de falha ou None, como o lote."""
         siafe = Siafe()
         total = estatisticas["total"]
-        progresso_base = total - len(pendentes)
         try:
             siafe.abrir_driver(tempo_wait=20)
 
-            for idx_grupo, ((versao_siafe, ano_doc), registros) in enumerate(grupos.items()):
+            for idx_grupo, (ano_doc, registros) in enumerate(grupos.items()):
                 log.info(
                     f"[ETAPA 1] Sessão SIAFE versao={versao_siafe} ano={ano_doc} "
                     f"({len(registros)} GR(s))"
@@ -484,13 +518,16 @@ class Fluxo:
                         else:
                             caminho_gr = baixar_gr_siafe_por_valor(
                                 siafe, reg["valor_pesquisa"], versao_siafe,
-                                data_pagamento=reg.get("data_pagamento"),
+                                data_pagamento=reg.get("data_pagamento") if self.modalidade.gr_filtra_por_data else None,
                                 primeira_consulta=primeira_consulta,
                             )
                         num_doc = num_doc_salvo
 
                         if not caminho_gr:
-                            raise ErroDownload(f"GR nao disponivel no SIAFE para {processo}.")
+                            procurada = num_doc_salvo or (
+                                f"R$ {formatar_moeda(reg['valor_pesquisa'])} (pagamento em {reg.get('data_pagamento')})"
+                            )
+                            raise ErroDownload(f"SIAFE não retornou a GR de {procurada}.")
 
                         if not num_doc:
                             num_doc = Path(caminho_gr).name.split(" - ")[0].strip()
@@ -514,6 +551,7 @@ class Fluxo:
 
                         estatisticas["erros"] += 1
                         estatisticas["erros_detalhe"].append({"processo": processo, "erro": str(e)})
+                        self._registrar_pendencia(processo, "gr", mensagem_curta(e), estatisticas)
                     finally:
                         print(f"__PROGRESSO__:{progresso_base}:{total}", flush=True)
 
@@ -526,6 +564,14 @@ class Fluxo:
                 log.debug(f"[ETAPA 1] Driver SIAFE ja indisponivel ao fechar: {e}")
 
         return None
+
+    def _registrar_gr_nao_consultadas(self, motivo_falha: str, estatisticas: dict) -> None:
+        """A sub-fase B parou no meio: as GRs que faltou consultar também são pendências."""
+        motivo = "login no SIAFE cancelado" if motivo_falha == "login_siafe_cancelado" else "consulta ao SIAFE interrompida"
+        ja_registrados = {p["processo"] for p in estatisticas["pendencias"]}
+        for reg in self.repo.buscar_por_status("aguardando_gr"):
+            if reg["processo"] not in ja_registrados:
+                self._registrar_pendencia(reg["processo"], "gr", motivo, estatisticas)
 
     def etapa1_coletar(
         self,
@@ -549,7 +595,7 @@ class Fluxo:
         sei = SEI()
         estatisticas = {
             "total": 0, "coletados": 0, "erros": 0,
-            "ignorados": 0, "ja_prontos": 0, "aguardando_gr": 0, "erros_detalhe": [],
+            "ignorados": 0, "ja_prontos": 0, "aguardando_gr": 0, "erros_detalhe": [], "pendencias": [],
         }
 
         try:
@@ -588,6 +634,9 @@ class Fluxo:
                     if outra_modalidade:
                         log.warning(f"[{i}/{total}] {processo} já está registrado como '{outra_modalidade}'; confira o marcador. Pulando.")
                         estatisticas["ignorados"] += 1
+                        self._registrar_pendencia(
+                            processo, "marcador", f"já registrado como '{outra_modalidade}'", estatisticas, gravar=False,
+                        )
                         print(f"__PROGRESSO__:{i}:{total}", flush=True)
                         continue
                     existente = self.repo.buscar_por_numero(processo)
@@ -600,6 +649,9 @@ class Fluxo:
                     if status_existente == STATUS_REVISAR_DESPACHO:
                         log.warning(f"[{i}/{total}] {processo} aguardando revisão manual do despacho. Pulando.")
                         estatisticas["ignorados"] += 1
+                        self._registrar_pendencia(
+                            processo, "despacho", existente.get("motivo_pendencia"), estatisticas, gravar=False,
+                        )
                         print(f"__PROGRESSO__:{i}:{total}", flush=True)
                         continue
                     if status_existente == "aguardando_gr":
@@ -641,6 +693,7 @@ class Fluxo:
                 log.debug(f"[ETAPA 1] Driver ja indisponivel ao fechar: {e}")
         falha_siafe = self._baixar_gr_pendentes_em_lote(pedir_credenciais_siafe, estatisticas)
         if falha_siafe:
+            self._registrar_gr_nao_consultadas(falha_siafe["motivo"], estatisticas)
             return falha_siafe
 
         return {"sucesso": True, "estatisticas": estatisticas}
@@ -665,7 +718,7 @@ class Fluxo:
         sei = SEI()
         estatisticas = {
             "total": 0, "concluidos": 0, "ignorados": 0, "erros": 0,
-            "erros_detalhe": [], "despachos_parciais": [],
+            "erros_detalhe": [], "despachos_parciais": [], "pendencias": [],
         }
 
         try:
@@ -720,13 +773,19 @@ class Fluxo:
                         log.info(f"[{i}/{total}] {processo} finalizado com sucesso.")
                         if not despacho_completo:
                             estatisticas["despachos_parciais"].append(processo)
-                            print(f"__DESPACHO_PARCIAL__:{processo}", flush=True)
+                            self._registrar_pendencia(
+                                processo, "despacho_incompleto", "faltaram dados no sistema", estatisticas, gravar=False,
+                            )
                     else:
                         estatisticas["ignorados"] += 1
                         log.info(f"[{i}/{total}] {processo} ignorado (não acessível ou fora do marcador).")
                 except Exception as e:
                     estatisticas["erros"] += 1
                     estatisticas["erros_detalhe"].append({"processo": processo, "erro": str(e)})
+                    if isinstance(e, ErroRevisarDespacho):
+                        self._registrar_pendencia(processo, "despacho", "formatação do despacho não confirmada", estatisticas)
+                    else:
+                        self._registrar_pendencia(processo, "finalizacao", mensagem_curta(e), estatisticas)
                     navegador_com_perda = _logar_erro_lote(processo, i, total, e, "finalizacao", sei=sei)
                 finally:
                     if em_modo_debug:

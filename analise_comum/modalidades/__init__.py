@@ -40,6 +40,8 @@ class Modalidade:
     campos_do_documento_origem: tuple[str, ...] = ()
     # documentos gerados na coleta e anexados na Etapa 2: (título no SEI, coluna do caminho, coluna da flag)
     anexos_extras: tuple[tuple[str, str, str], ...] = ()
+    # na consulta da GR por valor, filtra também pela data de pagamento ('Data Emissão' no SIAFE)
+    gr_filtra_por_data: bool = False
 
     # --- Etapa 1: extração ---------------------------------------------------
     def extrair_dados_documento(self, texto: str) -> dict | None:

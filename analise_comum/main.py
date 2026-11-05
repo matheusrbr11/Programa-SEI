@@ -4,7 +4,9 @@ A interface manda, na primeira linha do stdin, um JSON com sei_user/sei_pass.
 A senha do SIAFE só é pedida quando o fluxo vai entrar nele, uma vez por versão
 (SIAFE-Rio 2 e SIAFE-Rio 1 podem ter senhas diferentes): o subprocesso escreve
 ``__PEDIR_SIAFE__:{"versao", "nome", "erro"}`` no stdout e lê, na próxima linha
-do stdin, ``{"siafe_user", "siafe_pass"}`` ou ``null`` (login cancelado)."""
+do stdin, ``{"siafe_user", "siafe_pass"}`` ou ``null`` (login cancelado).
+
+Ao terminar uma etapa, envia as pendências da execução (ver ``pendencias``)."""
 
 from __future__ import annotations
 from typing import Callable, Optional
@@ -13,6 +15,7 @@ import sys
 
 from .core import configurar_ambiente
 from .log import log
+from .pendencias import PREFIXO_PENDENCIAS
 
 _CODIGOS_SAIDA_FALHA = {
     "falha_login_sei": 2,
@@ -21,6 +24,13 @@ _CODIGOS_SAIDA_FALHA = {
     "navegador_perdido": 4,
     "erro_critico": 5,
 }
+
+
+def _enviar_pendencias(resultado: dict) -> None:
+    """Manda à interface os processos que ficaram pendentes nesta execução."""
+    pendencias = resultado.get("estatisticas", {}).get("pendencias")
+    if pendencias:
+        print(PREFIXO_PENDENCIAS + json.dumps(pendencias), flush=True)
 
 
 def _codigo_saida_falha(resultado: dict) -> int:
@@ -100,6 +110,7 @@ def executar(
 
     if etapa == "etapa1":
         r1 = etapa1_coletar(sei_user, sei_pass, _pedir_credenciais_siafe_via_stdin())
+        _enviar_pendencias(r1)
         if not r1["sucesso"]:
             if r1.get("motivo") == "login_siafe_cancelado":
                 log.warning("Login no SIAFE cancelado: as GRs pendentes ficam para a próxima execução.")
@@ -111,6 +122,7 @@ def executar(
     elif etapa == "etapa2":
 
         r2 = etapa2_finalizar(sei_user, sei_pass)
+        _enviar_pendencias(r2)
         if not r2["sucesso"]:
             log.error("Erro ao responder processos SEI.")
             sys.exit(_codigo_saida_falha(r2))

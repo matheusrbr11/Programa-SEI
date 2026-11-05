@@ -48,6 +48,7 @@ Os dois módulos — **Crédito em Conta** e **Depósito Judicial** — seguem o
 - Tela de login com autenticação via usuário e senha do SEI
 - Menu principal com acesso aos módulos **Crédito em Conta** e **Depósito Judicial**
 - Tela de execução com log em tempo real, barra de progresso e botão de cancelamento
+- Resumo ao final de cada execução com os processos pendentes e o motivo, e tela **VER PENDÊNCIAS** com o que continua aberto no banco
 - Notificação automática de erros críticos por e-mail e/ou Microsoft Teams ao encerrar o programa
 
 ### 2. Etapa 1 — Processar Processos (Coleta)
@@ -236,11 +237,11 @@ Abra o programa pelo atalho ou via `exe.py`. Na tela de login, insira seu **usu�
 No menu principal, escolha o módulo desejado: **Crédito em Conta** ou **Depósito Judicial**. Os dois seguem exatamente o mesmo fluxo de duas etapas, cada um filtrando pelo seu próprio marcador no SEI.
 
 ### Passo 3 — Processar Processos (Etapa 1)
-Clique em **PROCESSAR PROCESSOS**. Na primeira vez da sessão, o programa pede o login do **SIAFE-Rio** (CPF e senha); nas próximas, reaproveita a credencial já validada. Em seguida, o programa irá:
+Clique em **PROCESSAR PROCESSOS**. O programa irá:
 1. Percorrer os processos marcados no SEI com o marcador do módulo escolhido
 2. Extrair os dados dos anexos e, se necessário, consultar o Banco do Brasil
 3. No Depósito Judicial, gerar a planilha de Resgate a partir do movimento diário do BB e convertê-la no Comprovante DJO em PDF
-4. Localizar ou baixar a Guia de Recolhimento no SIAFE-Rio
+4. Localizar a Guia de Recolhimento e, se precisar baixá-la, pedir o login do **SIAFE-Rio** (CPF e senha), uma vez por versão do SIAFE durante a sessão. Se precisar das duas versões, o SIAFE-Rio 2 roda primeiro; o login do SIAFE-Rio 1 só é pedido quando ele termina
 5. Registrar o andamento na tabela de controle do banco de dados
 
 > ⚠️ Esta etapa **não conclui** os processos no SEI. Ela apenas coleta os dados necessários.
@@ -272,6 +273,7 @@ O programa mantém uma tabela de checkpoint, `processos`, criada dinamicamente n
 | `usuario_resposta` | TEXT | Login do usuário que finalizou o processo |
 | `data_hora_resposta` | TEXT | Horário da finalização |
 | `tempo_resposta` | REAL | Tempo de execução da Etapa 2 |
+| `motivo_pendencia` | TEXT | Motivo da pendência atual; apagado na próxima gravação do processo sem pendência |
 
 Colunas preenchidas só na modalidade `dj` (nulas, ou 0 nas flags, em `cc`):
 
@@ -296,6 +298,14 @@ O checkpoint permite retomar de onde parou caso o programa seja interrompido ent
 
 ---
 
+## 📌 Pendências
+
+Ao terminar uma etapa, a interface mostra os processos que precisam de ação, agrupados, com o motivo. A lista completa fica na caixa de log, e a tela de execução continua aberta até você voltar.
+
+A tela **VER PENDÊNCIAS** de cada módulo lista o que continua aberto no banco: `revisar_despacho`, `aguardando_gr`, `erro_coleta` e `dados_coletados` com motivo (a Etapa 2 falhou). Despacho incompleto e marcador errado aparecem só no resumo da execução, porque o programa não tem como saber depois se foram resolvidos.
+
+---
+
 ## 🔢 Códigos de Saída
 
 O subprocesso de automação devolve um código de saída ao final de cada etapa, interpretado pela interface:
@@ -303,7 +313,7 @@ O subprocesso de automação devolve um código de saída ao final de cada etapa
 | Código | Significado |
 |---|---|
 | `0` | Sucesso total |
-| `1` | Sucesso parcial (alguns processos pulados) |
+| `1` | Sucesso parcial (erro em algum processo ou login do SIAFE cancelado) |
 | `2` | Falha de login no SEI |
 | `3` | Falha de login no SIAFE |
 | `4` | Navegador ou sessão perdida |

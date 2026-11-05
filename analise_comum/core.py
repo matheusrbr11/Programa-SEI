@@ -40,6 +40,11 @@ class ErroSEI(ErroProcesso):
     pass
 
 
+class ErroRevisarDespacho(ErroSEI):
+    """Despacho incluído sem formatação confirmada: processo retirado do fluxo até a revisão manual."""
+    pass
+
+
 class ErroSIAFE(ErroProcesso):
     """Erro ao interagir com o SIAFE (fora de falha de login)."""
     pass

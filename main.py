@@ -6,6 +6,7 @@ import threading
 import traceback
 import logging
 import base64
+import customtkinter as ctk
 import queue
 import json
 import sys
@@ -14,6 +15,8 @@ import os
 from eop_ui import AppConfig, BaseApp
 from jupiter import configurar_log, Siafe, GraphAPI
 from ambiente import PASTA_LOG_GERAL
+from analise_comum.pendencias import PREFIXO_PENDENCIAS, linhas_pendencias
+from analise_comum.repositorio import Repositorio
 
 logger = logging.getLogger("jupiter.SEI")
 
@@ -26,8 +29,10 @@ MODULOS = {
 # linhas que o subprocesso escreve no stdout para a interface (o resto é log)
 PREFIXO_BARRA = "__PROGRESSO__:"
 PREFIXO_DETALHE_ERRO = "__ERRO_DETALHE__:"
-PREFIXO_DESPACHO_PARCIAL = "__DESPACHO_PARCIAL__:"
 PREFIXO_PEDIR_SIAFE = "__PEDIR_SIAFE__:"  # o subprocesso vai entrar no SIAFE e precisa das credenciais
+
+# processos listados na mensagem final; a lista completa fica na caixa de log
+LIMITE_PENDENCIAS_MENSAGEM = 15
 
 # campos do cfg trocados pela tela de login do siafe e restaurados depois
 CAMPOS_CFG_LOGIN = ("login_subtitle", "login_user_label", "user_digits_only", "user_exact_length", "user_max_length")
@@ -63,7 +68,7 @@ class SeiApp(BaseApp):
     def __init__(self):
         cfg = AppConfig(
             app_name="Programa SEI",
-            app_version="1.6.0",
+            app_version="1.7.0",
             login_subtitle="⚠️ Faça Login com os dados do SEI. ⚠️",
             login_user_label="Usuário do SEI:",
             image_filename="img/SEI.png",
@@ -212,6 +217,35 @@ class SeiApp(BaseApp):
             frame_etapas, text="RESPONDER PROCESSOS",
             command=lambda: self.iniciar_operacao_thread(codigo, "etapa2")
         ).pack(pady=10)
+        self.make_primary_button(
+            frame_etapas, text="VER PENDÊNCIAS",
+            command=lambda: self.show_pendencias_frame(codigo)
+        ).pack(pady=10)
+        self._add_footer()
+
+    def show_pendencias_frame(self, codigo):
+
+        # tela de pendências: o que continua aberto no banco, mesmo de execuções anteriores
+        nome, _ = MODULOS[codigo]
+        try:
+            repositorio = Repositorio(codigo)
+            repositorio.inicializar()
+            pendencias = repositorio.listar_pendencias()
+        except Exception:
+            logger.error("Erro ao ler as pendências no banco de dados", exc_info=True)
+            self.messagebox_error("Erro", "Não foi possível ler as pendências no banco de dados.")
+            return
+
+        self.clear_frame()
+        self.create_menu()
+        self.add_back_button(lambda: self.show_modulo_frame(codigo))
+        self.make_header_label(nome, pady=(20, 5))
+        self.make_subtitle_label(f"Pendências ({len(pendencias)})", pady=(0, 10))
+
+        caixa = ctk.CTkTextbox(self.main_container, width=450, height=450, wrap="word")
+        caixa.pack(pady=10)
+        caixa.insert("0.0", "\n".join(linhas_pendencias(pendencias)) or "Nenhuma pendência.")
+        caixa.configure(state="disabled")
         self._add_footer()
 
 
@@ -329,10 +363,26 @@ class SeiApp(BaseApp):
         self.retorno_automatico = True
         threading.Thread(target=self.execucao_thread, args=(codigo, etapa), daemon=True).start()
 
+    def _apresentar_pendencias(self, pendencias):
+
+        # escreve a lista completa na caixa de log e mantém essa tela aberta pra leitura;
+        # devolve o trecho da mensagem final, que tem um limite de processos pra caber na janela
+        if not pendencias:
+            return ""
+
+        self.retorno_automatico = False
+        self.log(f">>> {len(pendencias)} pendência(s) nesta execução:")
+        for linha in linhas_pendencias(pendencias):
+            if linha:
+                self.log(linha)
+
+        lista = "\n".join(linhas_pendencias(pendencias, limite=LIMITE_PENDENCIAS_MENSAGEM))
+        return f"\n\n{len(pendencias)} pendência(s):\n\n{lista}"
+
     def execucao_thread(self, codigo, etapa):
         nome, script = MODULOS[codigo]
         process = None
-        processos_despacho_parcial = []
+        pendencias = []
         try:
             script_path = str(self.cfg.base_path / script)
 
@@ -395,10 +445,11 @@ class SeiApp(BaseApp):
                             self.erros_acumulados[-1]["traceback"] = detalhe
                     except Exception:
                         pass
-                elif linha_limpa.startswith(PREFIXO_DESPACHO_PARCIAL):
-                    processo_parcial = linha_limpa[len(PREFIXO_DESPACHO_PARCIAL):].strip()
-                    if processo_parcial:
-                        processos_despacho_parcial.append(processo_parcial)
+                elif linha_limpa.startswith(PREFIXO_PENDENCIAS):
+                    try:
+                        pendencias = json.loads(linha_limpa[len(PREFIXO_PENDENCIAS):])
+                    except ValueError:
+                        logger.error("Resumo de pendências inválido recebido do subprocesso", exc_info=True)
                 # linhas de log: tira o prefixo do nível e mostra na interface
                 elif linha_limpa.startswith(("INFO:", "WARNING:", "ERROR:")):
                     tag = linha_limpa.split(":", 1)[0] + ":"
@@ -417,7 +468,11 @@ class SeiApp(BaseApp):
 
             # traduz o código de retorno num aviso pro usuário
             if not self.stop_event:
-                if ret_code == 0:
+                texto_pendencias = self._apresentar_pendencias(pendencias)
+
+                if ret_code in (0, 1) and pendencias:
+                    self.finalize_progress("Concluído com Pendências", "Aviso", f"O processo foi concluído.{texto_pendencias}", "warning")
+                elif ret_code == 0:
                     self.finalize_progress("Concluído", "Sucesso", "Processo concluído com sucesso!", "info")
                 elif ret_code == 1:
                     self.finalize_progress("Concluído com Alertas", "Aviso", "O processo foi concluído de forma parcial.", "info")
@@ -429,25 +484,12 @@ class SeiApp(BaseApp):
                     self.finalize_progress("Erro de Login", "Erro", "Erro ao autenticar no SIAFE. Verifique usuário e senha.", "error")
                     self.credenciais_siafe.clear()
                 elif ret_code == 4:
-                    self.finalize_progress("Erro de Navegador", "Erro", "Erro de navegador. A sessão do navegador foi encerrada.", "error")
+                    self.finalize_progress("Erro de Navegador", "Erro", f"Erro de navegador. A sessão do navegador foi encerrada.{texto_pendencias}", "error")
                     self.retorno_automatico = False
                 elif ret_code == 5:
-                    self.finalize_progress("Erro Crítico", "Erro", "Ocorreu um erro inesperado durante a execução.", "error")
+                    self.finalize_progress("Erro Crítico", "Erro", f"Ocorreu um erro inesperado durante a execução.{texto_pendencias}", "error")
                 else:
-                    self.finalize_progress("Finalizado com Erros", "Erro", f"O processo foi finalizado com código {ret_code}.", "error")
-
-                if processos_despacho_parcial:
-                    lista = "\n".join(f"- {p}" for p in processos_despacho_parcial)
-                    mensagem_parcial = (
-                        f"O(s) processo(s) a seguir tiveram o despacho de {nome} "
-                        "preenchido parcialmente, por faltarem dados no "
-                        f"sistema:\n\n{lista}\n\n"
-                        "Complete as informações faltantes manualmente antes de assinar."
-                    )
-                    self.after(
-                        200,
-                        lambda: self.messagebox_warning("Despacho(s) Incompleto(s)", mensagem_parcial),
-                    )
+                    self.finalize_progress("Finalizado com Erros", "Erro", f"O processo foi finalizado com código {ret_code}.{texto_pendencias}", "error")
 
         except (NoSuchElementException, SessionNotCreatedException, InvalidSessionIdException):
             if not self.stop_event:
