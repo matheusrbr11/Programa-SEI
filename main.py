@@ -67,8 +67,8 @@ class SeiApp(BaseApp):
 
     def __init__(self):
         cfg = AppConfig(
-            app_name="Programa SEI",
-            app_version="1.7.0",
+            app_name="Programa Argos",
+            app_version="1.5.2",
             login_subtitle="⚠️ Faça Login com os dados do SEI. ⚠️",
             login_user_label="Usuário do SEI:",
             image_filename="img/SEI.png",
@@ -110,7 +110,7 @@ class SeiApp(BaseApp):
         total = len(self.erros_acumulados)
         # monta o corpo da mensagem linha a linha
         linhas = [
-            "Resumo de erros — Programa SEI",
+            "Resumo de erros — Programa Argos",
             f"Usuário: {os.getlogin()}",
             f"Total de erros na sessão: {total}",
         ]
@@ -121,7 +121,7 @@ class SeiApp(BaseApp):
             if err["traceback"]:
                 linhas.append(err["traceback"].strip())
         mensagem = "\n".join(linhas)
-        titulo = f"[SEI] {total} erro(s) na execução"
+        titulo = f"[Argos] {total} erro(s) na execução"
 
         try:
             # manda por e-mail e/ou teams, conforme o que estiver configurado
@@ -186,7 +186,7 @@ class SeiApp(BaseApp):
         self.create_menu()
         self.add_back_button(self.show_sei_login_frame)
         self._add_logo()
-        self.make_header_label("Programa SEI", pady=(20, 5))
+        self.make_header_label("Programa Argos", pady=(20, 5))
         self.make_subtitle_label("Menu Principal", pady=(0, 20))
 
         frame_modulos = self.make_section_frame()
@@ -517,7 +517,7 @@ if __name__ == "__main__":
 
     # configura os logs: um geral na rede e um só de erros na pasta local
     pasta_erros = Path(__file__).parent / "logs"
-    caminho_geral, caminho_erros = configurar_log("Programa SEI", PASTA_LOG_GERAL, pasta_erros, callback_interface=app.log)
+    caminho_geral, caminho_erros = configurar_log("Programa Argos", PASTA_LOG_GERAL, pasta_erros, callback_interface=app.log)
 
     # Coleta automática de todo logger.error() (do app e da biblioteca) para o resumo enviado ao fechar.
     coletor_erros = ColetorErros(app.erros_acumulados)
