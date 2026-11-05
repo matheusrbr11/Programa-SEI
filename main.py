@@ -14,7 +14,7 @@ import os
 
 from eop_ui import AppConfig, BaseApp
 from jupiter import configurar_log, Siafe, GraphAPI
-from ambiente import PASTA_LOG_GERAL
+from ambiente import PASTA_LOG_GERAL, VERSAO_SIAFE_RIO_1
 from analise_comum.pendencias import PREFIXO_PENDENCIAS, linhas_pendencias
 from analise_comum.repositorio import Repositorio
 
@@ -35,7 +35,14 @@ PREFIXO_PEDIR_SIAFE = "__PEDIR_SIAFE__:"  # o subprocesso vai entrar no SIAFE e 
 LIMITE_PENDENCIAS_MENSAGEM = 15
 
 # campos do cfg trocados pela tela de login do siafe e restaurados depois
-CAMPOS_CFG_LOGIN = ("login_subtitle", "login_user_label", "user_digits_only", "user_exact_length", "user_max_length")
+CAMPOS_CFG_LOGIN = (
+    "login_subtitle", "login_user_label", "user_digits_only", "user_exact_length", "user_max_length",
+    "image_filename", "logo_size",
+)
+
+# logo da tela de login de cada siafe: (arquivo, tamanho), na mesma altura do logo do sei
+LOGO_SIAFE_RIO_1 = ("img/siafe1.png", (322, 125))
+LOGO_SIAFE_RIO_2 = ("img/siafe2.png", (355, 125))
 
 
 class ColetorErros(logging.Handler):
@@ -290,6 +297,9 @@ class SeiApp(BaseApp):
         self.cfg.user_digits_only = True
         self.cfg.user_exact_length = True
         self.cfg.user_max_length = 11
+        self.cfg.image_filename, self.cfg.logo_size = (
+            LOGO_SIAFE_RIO_1 if pedido["versao"] == VERSAO_SIAFE_RIO_1 else LOGO_SIAFE_RIO_2
+        )
 
         def responder(resposta):
             for campo, valor in cfg_salvo.items():

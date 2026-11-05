@@ -44,8 +44,7 @@ NOME_TITULO_COMPROVANTE_DJO = "Comprovante DJO - Movimento Diário"
 
 # Modelo de despacho salvo no SEI é individual por usuário; 'bdeza' usa o
 # modelo com sufixo B, qualquer outro usuário usa o modelo com sufixo M.
-_SUFIXO_DESPACHO_USUARIO = "B" if os.getlogin().lower() == "bdeza" else "M"
-DESPACHO_PADRAO = f"DPJ_{_SUFIXO_DESPACHO_USUARIO}"
+SUFIXO_DESPACHO_USUARIO = "B" if os.getlogin().lower() == "bdeza" else "M"
 BLOCO_ASSINATURA = "1437591 - BLOCO PARA ASSINATURAS DOS DESPACHOS DA COOCB - SUPCONFI"
 ORGAO_SEI_PADRAO = "SEFAZ"
 # o SEI abre na última unidade usada; sem fixar, o marcador pode vir vazio e o lote "terminar" sem nada
