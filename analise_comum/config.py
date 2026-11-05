@@ -48,7 +48,7 @@ SUFIXO_DESPACHO_USUARIO = "B" if os.getlogin().lower() == "bdeza" else "M"
 BLOCO_ASSINATURA = "1437591 - BLOCO PARA ASSINATURAS DOS DESPACHOS DA COOCB - SUPCONFI"
 ORGAO_SEI_PADRAO = "SEFAZ"
 # o SEI abre na última unidade usada; sem fixar, o marcador pode vir vazio e o lote "terminar" sem nada
-UNIDADE_SEI = "SEFAZ/SUPCONC1"
+UNIDADE_SEI = "SEFAZ/COOCB"
 
 # ---------------------------------------------------------------------------
 # SEI
