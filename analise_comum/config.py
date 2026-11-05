@@ -5,7 +5,7 @@ import os
 
 from ambiente import (  # noqa: F401 — reexportados para os módulos dos fluxos
     VERSAO_SEI, VERSAO_SIAFE_RIO_2, VERSAO_SIAFE_RIO_1,
-    PASTA_LOG_GERAL, PASTA_GR, CAMINHO_HERMES,
+    PASTA_LOG_GERAL, PASTA_GR, CAMINHO_HERMES, CAMINHO_ARGOS,
 )
 
 # ---------------------------------------------------------------------------

@@ -31,6 +31,7 @@ from .core import (
     ErroDownload, ErroDadosNaoLocalizadosBB,
 )
 from .log import log
+from .repositorio import conectar_somente_leitura
 from .utils import (
     buscar_regex,
     extrair_texto_pdf,
@@ -77,7 +78,7 @@ def _listar_contabilizacoes() -> list[dict]:
             _cache_contabilizacoes = []
         else:
             try:
-                with closing(sqlite3.connect(CAMINHO_HERMES)) as con:
+                with closing(conectar_somente_leitura(CAMINHO_HERMES)) as con:
                     con.row_factory = sqlite3.Row
                     cursor = con.execute(
                         "SELECT id, num_documento, valor, observacao, data FROM contabilizacoes"

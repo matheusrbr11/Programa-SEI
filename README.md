@@ -185,13 +185,13 @@ Programa SEI/
 ├── config.example.json      # Modelo de configuração
 │
 ├── ambiente.py              # Produção/Homologação e caminhos que dependem dele
-├── migrar_tabela_processos.py  # Migração única das tabelas antigas para a tabela processos
+├── migrar_tabela_processos.py  # Migração única das tabelas antigas do hermes.db para o argos.db
 │
 ├── analise_comum/           # Todo o código dos fluxos
 │   ├── main.py               #   Entry-point: lê credenciais e executa a etapa da modalidade
 │   ├── orchestrator.py       #   Fluxo único: coleta (Etapa 1), GR em lote no SIAFE e finalização (Etapa 2)
 │   ├── services.py            #   Integrações: BB, contabilizações, SIAFE e helpers do SEI
-│   ├── repositorio.py         #   Persistência: tabela processos (todas as modalidades) no hermes.db
+│   ├── repositorio.py         #   Persistência: tabela processos (todas as modalidades) no argos.db
 │   ├── extractors.py         #   Extração de dados dos PDFs (comprovante, ofício, alvará, mandado)
 │   ├── core.py                #   Exceções e setup de log do subprocesso
 │   ├── log.py                 #   Logger do fluxo em execução
@@ -285,14 +285,14 @@ Colunas preenchidas só na modalidade `dj` (nulas, ou 0 nas flags, em `cc`):
 | `titulo_documento` / `numero_documento` | TEXT | Identificação do documento de origem (ofício, alvará, mandado) |
 | `tem_comprovante_djo` | INTEGER | Flag de controle da instrução |
 
-A tabela vive no `hermes.db`, definido em `CAMINHO_HERMES`. Cada fluxo lê e grava só os registros da sua modalidade. Um processo só aparece nos dois fluxos se foi colocado no marcador errado:
+A tabela vive no `argos.db`, o banco próprio do programa, definido em `CAMINHO_ARGOS`. O `hermes.db` (`CAMINHO_HERMES`) é aberto só para leitura, para consultar `contabilizacoes`. Cada fluxo lê e grava só os registros da sua modalidade. Um processo só aparece nos dois fluxos se foi colocado no marcador errado:
 
 - registrado na outra modalidade como `ignorado`: o fluxo atual assume o processo (o marcador foi corrigido);
 - registrado na outra modalidade com outro status: o fluxo pula o processo e avisa no log para conferir o marcador.
 
 No modo DEBUG, marque `status = 'debug'` no registro com a modalidade certa.
 
-As tabelas antigas (`processos_credito_conta` / `processos_deposito_judicial`) não são mais usadas. Para trazer os registros delas, rode `migrar_tabela_processos.py` com o Hermes e o Programa-SEI fechados e a tabela `processos` ainda vazia: sem `--aplicar` ele só mostra o que faria; com `--aplicar` faz backup do banco, migra e deixa as antigas como `*_old`, com views só de leitura no nome antigo.
+As tabelas antigas do `hermes.db` (`processos_credito_conta` / `processos_deposito_judicial`) não são mais usadas. Para trazer os registros delas, rode `migrar_tabela_processos.py` com o Programa Argos fechado e a tabela `processos` do `argos.db` ainda vazia: sem `--aplicar` ele só mostra o que faria; com `--aplicar` copia os registros para o `argos.db`, sem alterar o `hermes.db`. Duplicados ativos nas duas tabelas precisam de uma decisão registrada em `DECISOES`, no próprio script.
 
 O checkpoint permite retomar de onde parou caso o programa seja interrompido entre as etapas — inclusive entre as sub-fases da Etapa 1.
 

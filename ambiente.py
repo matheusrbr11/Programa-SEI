@@ -24,6 +24,7 @@ PROJECT_BASE_PATH = Path(__file__).resolve().parent
 # pastas compartilhadas (logs, GRs PRJ, Programa Hermes) ficam ao lado dele.
 PASTA_SUPCONC = PROJECT_BASE_PATH.parent
 
+# O argos.db é o banco próprio do programa; o hermes.db é só lido (contabilizações).
 # Em homologação, tudo fica numa pasta local, para não misturar com a produção.
 # Copie o hermes.db da produção para homologacao/base de dados/ antes de rodar.
 if HOMOLOGACAO:
@@ -31,8 +32,10 @@ if HOMOLOGACAO:
     PASTA_LOG_GERAL = str(PASTA_HOMOLOGACAO / "logs")
     PASTA_GR = PASTA_HOMOLOGACAO / "GRs PRJ"
     CAMINHO_HERMES = PASTA_HOMOLOGACAO / "base de dados" / "hermes.db"
+    CAMINHO_ARGOS = PASTA_HOMOLOGACAO / "base de dados" / "argos.db"
     PASTA_GR.mkdir(parents=True, exist_ok=True)
 else:
     PASTA_LOG_GERAL = str(PASTA_SUPCONC / "logs" / "Programa SEI")
     PASTA_GR = PASTA_SUPCONC / "GRs PRJ"
     CAMINHO_HERMES = PASTA_SUPCONC / "Programa Hermes" / "base de dados" / "hermes.db"
+    CAMINHO_ARGOS = PROJECT_BASE_PATH / "base de dados" / "argos.db"

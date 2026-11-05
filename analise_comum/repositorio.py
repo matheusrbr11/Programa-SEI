@@ -1,5 +1,5 @@
-"""Persistência — Repository Pattern, acesso exclusivo à tabela ``processos``
-no hermes.db. NÃO modifica outras tabelas do banco.
+"""Persistência — Repository Pattern, acesso à tabela ``processos`` no argos.db,
+o banco próprio do programa. O hermes.db é só lido (``conectar_somente_leitura``).
 
 Cada processo tem uma única modalidade ('cc' ou 'dj'). O processo só aparece
 nos dois fluxos se alguém o colocou no marcador errado; ver ``upsert``."""
@@ -7,10 +7,12 @@ nos dois fluxos se alguém o colocou no marcador errado; ver ``upsert``."""
 from __future__ import annotations
 
 from contextlib import closing
+from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 import sqlite3
 
-from .config import CAMINHO_HERMES
+from .config import CAMINHO_ARGOS
 from .log import log
 from .pendencias import CATEGORIA_POR_STATUS
 
@@ -63,6 +65,12 @@ class ConflitoModalidade(Exception):
     """O processo já está registrado, e ativo, na outra modalidade."""
 
 
+def conectar_somente_leitura(caminho: Path) -> sqlite3.Connection:
+    """Abre o banco com mode=ro: o próprio SQLite recusa qualquer escrita.
+    A URI leva o caminho nativo escapado, que vale para disco local e para rede (\\\\servidor\\...)."""
+    return sqlite3.connect(f"file:{quote(str(caminho), safe=':')}?mode=ro", uri=True)
+
+
 def comandos_ddl() -> list[str]:
     """CREATE da tabela ``processos`` e do índice (usados também pela migração)."""
     colunas_ddl = ",\n".join(f"        {nome:<25} {tipo}" for nome, tipo in COLUNAS_TABELA)
@@ -93,13 +101,14 @@ class Repositorio:
         self.flags = frozenset(nome for nome, tipo in self.colunas if tipo == _TIPO_FLAG)
 
     def _conectar(self) -> sqlite3.Connection:
-        con = sqlite3.connect(CAMINHO_HERMES)
+        con = sqlite3.connect(CAMINHO_ARGOS)
         con.row_factory = sqlite3.Row
         return con
 
     def inicializar(self) -> None:
         """Garante que a tabela, o índice e as colunas existam (a tabela pode
         ter sido criada por uma versão anterior do programa)."""
+        CAMINHO_ARGOS.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._conectar()) as con:
             for comando in comandos_ddl():
                 con.execute(comando)
