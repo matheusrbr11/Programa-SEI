@@ -28,7 +28,7 @@ from .config import (
 from .extractors import ExtratorComprovante, ExtratorAgendamento
 from .core import (
     ErroSEI, ErroSIAFE, ErroBB, ErroLoginSiafe, ErroExtracao, ErroValidacao,
-    ErroDownload, ErroDadosNaoLocalizadosBB,
+    ErroDownload, ErroDadosNaoLocalizadosBB, ErroGRInvalida,
 )
 from .log import log
 from .repositorio import conectar_somente_leitura
@@ -310,19 +310,39 @@ def abrir_sessao_siafe(
         raise ErroLoginSiafe("Erro no login SIAFE.")
 
 
+def motivo_gr_invalida(caminho_pdf: str | Path) -> str | None:
+    """Confere no próprio PDF se a GR não serve ("está anulada" ou "é de estorno"; None se serve).
+    Cobre GRs já baixadas e o caso de a tabela do SIAFE não permitir identificá-las."""
+    texto = extrair_texto_pdf(str(caminho_pdf))
+    if re.search(r"DOCUMENTO\s+ANULADO\s+EM", texto, re.IGNORECASE):
+        return "está anulada"
+    # rótulos numa linha e valores na seguinte: "<domicílio bancário> Sim <valor líquido>"
+    if re.search(r"Estorno\s+Valor\s+L[íi]quido\s*\n[^\n]*\bSim\s+[\d.]+,\d{2}", texto, re.IGNORECASE):
+        return "é de estorno"
+    return None
+
+
 def _consultar_e_baixar_gr(siafe: Siafe, valor: float, acao_consulta: Callable[[Siafe], str | None]) -> str | None:
-    """Executa uma consulta (ja logada) e move o PDF baixado para PASTA_GR."""
+    """Executa uma consulta (ja logada) e move o PDF baixado para PASTA_GR. Levanta
+    ``ErroGRInvalida`` se só houver GR anulada ou de estorno; um PDF assim é descartado."""
     pasta_downloads = Path.home() / "Downloads"
     arquivos_antes = set(pasta_downloads.glob("*.pdf"))
 
     num_doc = acao_consulta(siafe)
     if not num_doc:
+        if siafe.gr_ignoradas:
+            raise ErroGRInvalida(f"Só há GR anulada ou de estorno no SIAFE: {', '.join(siafe.gr_ignoradas)}.")
         log.warning("Consulta SIAFE não retornou número de documento.")
         return None
 
     arquivo_baixado = aguardar_novo_pdf(pasta_downloads, arquivos_antes)
     if not arquivo_baixado:
         return None
+
+    motivo = motivo_gr_invalida(arquivo_baixado)
+    if motivo:
+        arquivo_baixado.unlink(missing_ok=True)
+        raise ErroGRInvalida(f"A GR {num_doc} {motivo} no SIAFE.")
 
     return mover_gr_para_destino(arquivo_baixado, num_doc, valor)
 
@@ -355,7 +375,8 @@ def baixar_gr_siafe_por_valor(
     primeira_consulta: bool = True,
 ) -> str | None:
     """Download de GR via consulta por valor (anos 2016-2024), tentando o
-    valor exato e, se não achar, uma tentativa a mais com +R$ 0,01.
+    valor exato e, se não achar, uma tentativa a mais com +R$ 0,01. GRs anuladas
+    ou de estorno não contam como encontradas.
 
     Espera uma sessão ``siafe`` já aberta e autenticada (ver ``abrir_sessao_siafe``)
     para a versão/ano corretos.
@@ -367,9 +388,15 @@ def baixar_gr_siafe_por_valor(
                 primeira_consulta=primeira,
             )
 
-        resultado = _consultar_e_baixar_gr(
-            siafe, valor_pesquisa, lambda s: consulta(s, valor=valor_pesquisa, primeira=primeira_consulta),
-        )
+        invalida_no_valor_exato = None
+        try:
+            resultado = _consultar_e_baixar_gr(
+                siafe, valor_pesquisa, lambda s: consulta(s, valor=valor_pesquisa, primeira=primeira_consulta),
+            )
+        except ErroGRInvalida as e:
+            log.warning(f"{e} Tentando com +R$ 0,01.")
+            invalida_no_valor_exato = e
+            resultado = None
         if resultado:
             return resultado
 
@@ -382,7 +409,11 @@ def baixar_gr_siafe_por_valor(
                 f"GR encontrada com +R$ 0,01 (calculado: R$ {valor_pesquisa:,.2f}, "
                 f"encontrado: R$ {valor_mais_um_centavo:,.2f})."
             )
-        return resultado
+            return resultado
+
+        if invalida_no_valor_exato:
+            raise invalida_no_valor_exato
+        return None
     except Exception as e:
         raise ErroSIAFE(f"Erro no download SIAFE: {mensagem_curta(e)}") from e
 

@@ -25,7 +25,7 @@ from .modalidades import Modalidade
 from .repositorio import Repositorio
 from .services import (
     mapear_estado_documentos, buscar_gr_no_banco, baixar_gr_no_siafe,
-    baixar_gr_siafe_por_valor, abrir_sessao_siafe,
+    baixar_gr_siafe_por_valor, abrir_sessao_siafe, motivo_gr_invalida,
 )
 from .utils import (
     formatar_moeda, localizar_gr_em_disco, mensagem_curta, navegador_perdido,
@@ -299,6 +299,11 @@ class Fluxo:
                 raise ErroSEI(f"Arquivo da GR não encontrado na pasta: {caminho_gr_path}")
 
             nome_arquivo_gr = caminho_gr_path.name
+            # cobre a GR já na pasta ou coletada antes desta checagem existir na Etapa 1
+            motivo_invalida = motivo_gr_invalida(caminho_gr_path)
+            if motivo_invalida:
+                raise ErroSEI(f"A GR '{nome_arquivo_gr}' {motivo_invalida} no SIAFE: confira a guia correta antes de responder o processo.")
+
             if num_doc and num_doc in nome_arquivo_gr:
                 self._anexar(sei, NOME_TITULO_GR, str(caminho_gr_path))
                 self.repo.upsert(processo=processo, status="dados_coletados", tem_gr=1)

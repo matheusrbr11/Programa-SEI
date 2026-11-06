@@ -66,6 +66,11 @@ class ErroDownload(ErroProcesso):
     pass
 
 
+class ErroGRInvalida(ErroDownload):
+    """A GR obtida no SIAFE está anulada ou é de estorno e não pode responder o processo."""
+    pass
+
+
 class ErroDadosNaoLocalizadosBB(ErroDownload):
     """BB respondeu 'Dados não localizados' mesmo após os retries de data e
     CNPJ (ver ``baixar_comprovante_bb``) — indica CNPJ e/ou data realmente
