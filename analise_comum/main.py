@@ -115,7 +115,7 @@ def executar(
             if r1.get("motivo") == "login_siafe_cancelado":
                 log.warning("Login no SIAFE cancelado: as GRs pendentes ficam para a próxima execução.")
             else:
-                log.error("Erro ao processar processos SEI.")
+                log.error("Erro ao analisar processos SEI.")
             sys.exit(_codigo_saida_falha(r1))
         _sair_com_estatisticas(r1)
 

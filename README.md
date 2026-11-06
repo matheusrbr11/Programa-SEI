@@ -51,7 +51,7 @@ Os dois módulos — **Crédito em Conta** e **Depósito Judicial** — seguem o
 - Resumo ao final de cada execução com os processos pendentes e o motivo, e tela **VER PENDÊNCIAS** com o que continua aberto no banco
 - Notificação automática de erros críticos por e-mail e/ou Microsoft Teams ao encerrar o programa
 
-### 2. Etapa 1 — Processar Processos (Coleta)
+### 2. Etapa 1 — Analisar Processos (Coleta)
 - Autenticação no **SIAFE-Rio**
 - Varredura dos processos marcados no SEI com o marcador `PGE - Credito em Conta - Processar` (Crédito em Conta) ou `PGE - Deposito Judicial - Processar` (Depósito Judicial)
 - Extração dos dados do anexo da PGE via **pdfplumber**, com estratégias dedicadas por tipo de documento
@@ -236,8 +236,8 @@ Abra o programa pelo atalho ou via `exe.py`. Na tela de login, insira seu **usu�
 ### Passo 2 — Menu Principal
 No menu principal, escolha o módulo desejado: **Crédito em Conta** ou **Depósito Judicial**. Os dois seguem exatamente o mesmo fluxo de duas etapas, cada um filtrando pelo seu próprio marcador no SEI.
 
-### Passo 3 — Processar Processos (Etapa 1)
-Clique em **PROCESSAR PROCESSOS**. O programa irá:
+### Passo 3 — Analisar Processos (Etapa 1)
+Clique em **ANALISAR PROCESSOS**. O programa irá:
 1. Percorrer os processos marcados no SEI com o marcador do módulo escolhido
 2. Extrair os dados dos anexos e, se necessário, consultar o Banco do Brasil
 3. No Depósito Judicial, gerar a planilha de Resgate a partir do movimento diário do BB e convertê-la no Comprovante DJO em PDF
