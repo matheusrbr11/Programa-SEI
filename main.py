@@ -217,7 +217,7 @@ class SeiApp(BaseApp):
 
         frame_etapas = self.make_section_frame()
         self.make_primary_button(
-            frame_etapas, text="PROCESSAR PROCESSOS",
+            frame_etapas, text="ANALISAR PROCESSOS",
             command=lambda: self.iniciar_operacao_thread(codigo, "etapa1")
         ).pack(pady=10)
         self.make_primary_button(
