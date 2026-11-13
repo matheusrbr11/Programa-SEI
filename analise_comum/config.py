@@ -4,7 +4,7 @@ from pathlib import Path
 import os
 
 from ambiente import (  # noqa: F401 — reexportados para os módulos dos fluxos
-    VERSAO_SEI, VERSAO_SIAFE_RIO_2, VERSAO_SIAFE_RIO_1,
+    VERSAO_SEI, VERSAO_SIAFE_RIO_2, VERSAO_SIAFE_RIO_1, HOMOLOGACAO,
     PASTA_LOG_GERAL, PASTA_GR, CAMINHO_HERMES, CAMINHO_ARGOS,
 )
 
@@ -45,10 +45,14 @@ NOME_TITULO_COMPROVANTE_DJO = "Comprovante DJO - Movimento Diário"
 # Modelo de despacho salvo no SEI é individual por usuário; 'bdeza' usa o
 # modelo com sufixo B, qualquer outro usuário usa o modelo com sufixo M.
 SUFIXO_DESPACHO_USUARIO = "B" if os.getlogin().lower() == "bdeza" else "M"
-BLOCO_ASSINATURA = "1437591 - BLOCO PARA ASSINATURAS DOS DESPACHOS DA COOCB - SUPCONFI"
 ORGAO_SEI_PADRAO = "SEFAZ"
 # o SEI abre na última unidade usada; sem fixar, o marcador pode vir vazio e o lote "terminar" sem nada
-UNIDADE_SEI = "SEFAZ/COOCB"
+if HOMOLOGACAO:
+    BLOCO_ASSINATURA = "1788 - Bloco Teste"
+    UNIDADE_SEI = "SEFAZ/SUPCONC1"
+else:
+    BLOCO_ASSINATURA = "1437591 - BLOCO PARA ASSINATURAS DOS DESPACHOS DA COOCB - SUPCONFI"
+    UNIDADE_SEI = "SEFAZ/COOCB"
 
 # ---------------------------------------------------------------------------
 # SEI

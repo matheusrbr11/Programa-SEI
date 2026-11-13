@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 from selenium.common.exceptions import WebDriverException, NoSuchElementException
+from selenium.webdriver.common.by import By
+from jupiter.seilibrary_xpaths import xpaths_pagina_inicial
 from pathlib import Path
 import pdfplumber
 import automaweb
@@ -38,6 +40,17 @@ def sessao_sei_viva(sei) -> bool:
     try:
         _ = sei.driver.window_handles
         return True
+    except Exception:
+        return False
+
+
+def sei_fora_da_tela_de_trabalho(sei) -> bool:
+    """Indica se a janela do SEI perdeu a barra superior com a pesquisa rápida, como
+    quando a sessão cai e o SEI volta para a tela de login. Navegador que não responde
+    retorna False: esse caso é tratado por ``navegador_perdido``/``sessao_sei_viva``."""
+    try:
+        sei.driver.switch_to.default_content()
+        return not sei.driver.find_elements(By.XPATH, xpaths_pagina_inicial.pesquisa_rapida)
     except Exception:
         return False
 

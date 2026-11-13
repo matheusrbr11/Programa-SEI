@@ -29,7 +29,7 @@ from .services import (
 )
 from .utils import (
     formatar_moeda, localizar_gr_em_disco, mensagem_curta, navegador_perdido,
-    sessao_siafe_viva, sessao_sei_viva,
+    sessao_siafe_viva, sessao_sei_viva, sei_fora_da_tela_de_trabalho,
 )
 
 # despacho incluído sem formatação confirmada: fora das Etapas 1 e 2 até revisão manual
@@ -53,6 +53,19 @@ def determinar_versao_siafe(ano: int) -> tuple[int, str]:
     if 2016 <= ano <= 2023:
         return VERSAO_SIAFE_RIO_1, "SIAFE-Rio 1"
     raise ErroValidacao(f"Ano {ano} inválido. O ano deve ser 2016 ou superior.")
+
+
+def _reautenticar_sei_se_preciso(sei, sei_user: str, sei_pass: str, orgao_sei: str) -> bool:
+    """Depois de um erro num item do lote: se o SEI saiu da tela de trabalho (sessão
+    encerrada, de volta à tela de login), autentica de novo para os próximos itens, que
+    senão falhariam em cascata. Retorna False só quando era preciso e o login falhou."""
+    if not sei_fora_da_tela_de_trabalho(sei):
+        return True
+    log.warning("SEI fora da tela de trabalho (sessão encerrada?); autenticando novamente.")
+    if sei.logar_sei(VERSAO_SEI, sei_user, sei_pass, orgao_sei, unidade=UNIDADE_SEI):
+        return True
+    log.error("Novo login no SEI falhou; interrompendo o lote.")
+    return False
 
 
 def _logar_erro_lote(processo: str, i: int, total: int, e: Exception, acao: str, sei=None) -> bool:
@@ -666,12 +679,15 @@ class Fluxo:
                         continue
 
                 navegador_com_perda = False
+                sessao_perdida = False
                 try:
                     payload = self.coletar_dados_processo(sei, processo)
                     self._persistir_resultado_coleta(processo, payload, estatisticas)
                 except Exception as e:
                     navegador_com_perda = _logar_erro_lote(processo, i, total, e, "coleta", sei=sei)
                     self._registrar_erro_coleta(processo, e, estatisticas)
+                    if not navegador_com_perda:
+                        sessao_perdida = not _reautenticar_sei_se_preciso(sei, sei_user, sei_pass, orgao_sei)
                 finally:
                     if em_modo_debug:
                         resultado_real = self.repo.buscar_por_numero(processo)
@@ -685,6 +701,8 @@ class Fluxo:
                         "sucesso": False, "motivo": "navegador_perdido",
                         "estatisticas": estatisticas,
                     }
+                if sessao_perdida:
+                    return {"sucesso": False, "motivo": "falha_login_sei", "estatisticas": estatisticas}
 
         except ErroLoginSEI:
             return {"sucesso": False, "motivo": "falha_login_sei", "estatisticas": estatisticas}
@@ -764,6 +782,7 @@ class Fluxo:
             for i, reg in enumerate(pendentes, start=1):
                 processo = reg["processo"]
                 navegador_com_perda = False
+                sessao_perdida = False
                 inicio = time.monotonic()
                 try:
                     finalizado, despacho_completo = self.finalizar_processo(sei, reg, processos_no_marcador, marcador_filtro)
@@ -792,6 +811,8 @@ class Fluxo:
                     else:
                         self._registrar_pendencia(processo, "finalizacao", mensagem_curta(e), estatisticas)
                     navegador_com_perda = _logar_erro_lote(processo, i, total, e, "finalizacao", sei=sei)
+                    if not navegador_com_perda:
+                        sessao_perdida = not _reautenticar_sei_se_preciso(sei, sei_user, sei_pass, orgao_sei)
                 finally:
                     if em_modo_debug:
                         resultado_real = self.repo.buscar_por_numero(processo)
@@ -805,6 +826,8 @@ class Fluxo:
                         "sucesso": False, "motivo": "navegador_perdido",
                         "estatisticas": estatisticas,
                     }
+                if sessao_perdida:
+                    return {"sucesso": False, "motivo": "falha_login_sei", "estatisticas": estatisticas}
 
         except ErroLoginSEI:
             return {"sucesso": False, "motivo": "falha_login_sei", "estatisticas": estatisticas}
