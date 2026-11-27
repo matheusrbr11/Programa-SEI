@@ -22,10 +22,11 @@ def converter_planilha_para_pdf(caminho_xlsx: Path, caminho_pdf: Path | None = N
     caminho_pdf = Path(caminho_pdf).resolve() if caminho_pdf else caminho_xlsx.with_suffix(".pdf")
     caminho_pdf.parent.mkdir(parents=True, exist_ok=True)
 
-    excel = win32.Dispatch("Excel.Application")
-    excel.Visible = False
-    excel.DisplayAlerts = False
+    excel = None
     try:
+        excel = win32.DispatchEx("Excel.Application") # instância própria, sem mexer no Excel aberto do usuário
+        excel.Visible = False
+        excel.DisplayAlerts = False
         wb = excel.Workbooks.Open(str(caminho_xlsx))
         
         try:
@@ -50,7 +51,8 @@ def converter_planilha_para_pdf(caminho_xlsx: Path, caminho_pdf: Path | None = N
     except Exception as e:
         raise ErroProcesso(f"Erro ao converter '{caminho_xlsx.name}' para PDF: {e}") from e
     finally:
-        excel.Quit()
+        if excel is not None:
+            excel.Quit()
 
     if not caminho_pdf.exists():
         raise ErroProcesso(f"Conversão para PDF não gerou o arquivo esperado: {caminho_pdf}")
