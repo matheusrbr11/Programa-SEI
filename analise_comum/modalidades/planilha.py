@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_UP
 from pathlib import Path
 from copy import copy
 
@@ -177,7 +177,7 @@ def gerar_planilha_resgate(
     for col in ("F", "G", "H", "I"):
         ws_modelo[f"{col}{linha_totais}"] = f"=SUM({col}{PRIMEIRA_LINHA_DADOS}:{col}{ultima_linha_dados})"
     ws_modelo[f"{COLUNA_LC151}{linha_totais}"] = (
-        f"=ROUND(SUM({COLUNA_LC151}{PRIMEIRA_LINHA_DADOS}:{COLUNA_LC151}{ultima_linha_dados}),2)"
+        f"=ROUNDUP(ROUND(SUM({COLUNA_LC151}{PRIMEIRA_LINHA_DADOS}:{COLUNA_LC151}{ultima_linha_dados}),3),2)" #agora arredonda para cima no centavo
     )
 
     for col, largura in largura_max.items():
@@ -192,6 +192,6 @@ def gerar_planilha_resgate(
         (_lc151_bruto(ws_modelo[f"I{PRIMEIRA_LINHA_DADOS + i}"].value) for i in range(qtd_linhas)),
         start=Decimal("0"),
     )
-    valor_gr = float(soma_bruta.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    valor_gr = float(soma_bruta.quantize(Decimal("0.01"), rounding=ROUND_UP)) #GR com valor arredondado para cima no centavo, igual a fórmula da planilha
     log.info(f"Planilha de Resgate gerada: {caminho_saida.name} ({qtd_linhas} linha(s), GR = R$ {valor_gr:,.2f}).")
     return valor_gr
