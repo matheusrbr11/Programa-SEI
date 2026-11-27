@@ -33,6 +33,23 @@ def _enviar_pendencias(resultado: dict) -> None:
         print(PREFIXO_PENDENCIAS + json.dumps(pendencias), flush=True)
 
 
+_DESCRICAO_MOTIVO = {
+    "falha_login_sei": "falha no login do SEI",
+    "falha_login_siafe": "falha no login do SIAFE",
+    "navegador_perdido": "navegador fechado ou perdido",
+    "erro_critico": "erro crítico",
+}
+
+
+def _descrever_falha(resultado: dict) -> str:
+    """Motivo da falha, para a mensagem final."""
+    motivo = resultado.get("motivo")
+    texto = _DESCRICAO_MOTIVO.get(motivo, motivo or "motivo não informado")
+    if resultado.get("erro"):
+        texto += f": {resultado['erro']}"
+    return texto
+
+
 def _codigo_saida_falha(resultado: dict) -> int:
     """Traduz o motivo de falha em código de saída. Motivos nao mapeados
     caem no 5 (erro critico)."""
@@ -115,7 +132,7 @@ def executar(
             if r1.get("motivo") == "login_siafe_cancelado":
                 log.warning("Login no SIAFE cancelado: as GRs pendentes ficam para a próxima execução.")
             else:
-                log.error("Erro ao analisar processos SEI.")
+                log.error(f"Erro ao analisar processos SEI ({_descrever_falha(r1)}).")
             sys.exit(_codigo_saida_falha(r1))
         _sair_com_estatisticas(r1)
 
@@ -124,7 +141,7 @@ def executar(
         r2 = etapa2_finalizar(sei_user, sei_pass)
         _enviar_pendencias(r2)
         if not r2["sucesso"]:
-            log.error("Erro ao responder processos SEI.")
+            log.error(f"Erro ao responder processos SEI ({_descrever_falha(r2)}).")
             sys.exit(_codigo_saida_falha(r2))
         _sair_com_estatisticas(r2)
 
